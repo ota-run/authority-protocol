@@ -511,27 +511,55 @@ mod tests {
             signature: "signature".into(),
         };
 
-        for (kind, value) in [
+        for (kind, domain, value, expected_json, expected_identity) in [
+            (
+                CHALLENGE_REQUEST,
+                CHALLENGE_REQUEST_DOMAIN_V1,
+                serde_json::to_value(challenge).expect("challenge"),
+                r#"{"binding_identity":"binding","contract_identity":"contract","message_kind":"challenge_request","nonce_commitment":"nonce","protocol_version":"ota-crossing-broker/v1","semantic_scope_identity":"scope","work_unit_identity":"work"}"#,
+                "sha256:3503f9af4dbe3388487bba4c46ad163cae4c7f4da8efa7f8f4d9adb31c3214d1",
+            ),
             (
                 ATTESTATION_RESPONSE,
+                ATTESTATION_RESPONSE_DOMAIN_V1,
                 serde_json::to_value(attestation).expect("attestation"),
+                r#"{"algorithm":"ed25519","key_id":"attestation-key","payload":{"audience":"audience","authenticated_origin":"launcher","authority_mounts":["/etc/ota"],"binding_identity":"binding","challenge_nonce_commitment":"nonce","channel_delivery":"launcher_session_fd","expires_at":"2026-08-05T00:02:00Z","invocation_id":"invocation","issued_at":"2026-08-05T00:00:00Z","issuer":"issuer","message_kind":"attestation_response","runner_principal":"runner","semantic_scope_identity":"scope","work_unit_identity":"work"},"signature":"signature"}"#,
+                "sha256:cf6cd1f4e4a75ac1582a327fd2de83c75fd077814266c03e822d2414c6a4a1a4",
             ),
             (
                 AUTHORIZATION_REQUEST,
+                AUTHORIZATION_REQUEST_DOMAIN_V1,
                 serde_json::to_value(authorization).expect("authorization"),
+                r#"{"actor_mode":"non_agent","attestation_identity":"attestation","authority_id":"authority","binding_identity":"binding","challenge_nonce_commitment":"nonce","contract_identity":"contract","message_kind":"authorization_request","requested_lifetime_seconds":120,"runner_principal":"runner","semantic_scope_identity":"scope","work_unit_identity":"work"}"#,
+                "sha256:3aadc8178d27f850975f9923b5bbf70f399a47dab1dbb5fe449182fb11d50a65",
             ),
             (
                 AUTHORIZATION_DECISION,
+                AUTHORIZATION_DECISION_DOMAIN_V1,
                 serde_json::to_value(decision).expect("decision"),
+                r#"{"algorithm":"ed25519","key_id":"broker-key","payload":{"approval_reference":"approval","attestation_identity":"attestation","authority_id":"authority","binding_identity":"binding","broker_revision":7,"challenge_nonce_commitment":"nonce","contract_identity":"contract","decision":"allowed","expires_at":"2026-08-05T00:02:00Z","issued_at":"2026-08-05T00:00:00Z","message_kind":"authorization_decision","request_identity":"request","semantic_scope_identity":"scope","work_unit_identity":"work"},"signature":"signature"}"#,
+                "sha256:c5c63a0597808817d563e0542838cf339480ddfd8de7470e3be6a11900a9fff0",
             ),
-            (LEASE_ISSUANCE, serde_json::to_value(lease).expect("lease")),
+            (
+                LEASE_ISSUANCE,
+                LEASE_ISSUANCE_DOMAIN_V1,
+                serde_json::to_value(lease).expect("lease"),
+                r#"{"algorithm":"ed25519","key_id":"broker-key","payload":{"attestation_identity":"attestation","authority_id":"authority","authorization_decision_identity":"decision","binding_identity":"binding","broker_revision":7,"challenge_nonce_commitment":"nonce","contract_identity":"contract","expires_at":"2026-08-05T00:02:00Z","issued_at":"2026-08-05T00:00:00Z","lease_sequence":9,"message_kind":"lease_issuance","runner_principal":"runner","semantic_scope_identity":"scope","work_unit_identity":"work"},"signature":"signature"}"#,
+                "sha256:a40b879da59c7cc9dbb891aee5f88ec79afd219d57cdf40e7477317f4d11bba3",
+            ),
             (
                 LEASE_CONSUME,
+                LEASE_CONSUME_DOMAIN_V1,
                 serde_json::to_value(consume).expect("consume"),
+                r#"{"binding_identity":"binding","challenge_nonce_commitment":"nonce","crossing_transaction_id":"transaction-id","crossing_transaction_identity":"transaction","lease_identity":"lease","message_kind":"lease_consume","work_unit_identity":"work"}"#,
+                "sha256:24283d4438c471f303e6d0771adcdad54e1b850aa04ecf63f73bebcc50983471",
             ),
             (
                 LEASE_CONSUME_RESPONSE,
+                LEASE_CONSUME_RESPONSE_DOMAIN_V1,
                 serde_json::to_value(consumed).expect("consumed"),
+                r#"{"algorithm":"ed25519","key_id":"broker-key","payload":{"binding_identity":"binding","broker_revision":8,"challenge_nonce_commitment":"nonce","consume_request_identity":"consume","consumed_at":"2026-08-05T00:00:30Z","crossing_transaction_id":"transaction-id","crossing_transaction_identity":"transaction","lease_identity":"lease","message_kind":"lease_consume_response","state":"consumed","work_unit_identity":"work"},"signature":"signature"}"#,
+                "sha256:a47e830b9d2ae523b990047fe1456171c4ddde8d20e760b645fe07530be6b524",
             ),
         ] {
             let observed = value
@@ -543,6 +571,14 @@ mod tests {
                 })
                 .and_then(serde_json::Value::as_str);
             assert_eq!(observed, Some(kind));
+            let canonical = String::from_utf8(serde_jcs::to_vec(&value).expect("canonical wire"))
+                .expect("UTF-8 wire");
+            assert_eq!(canonical, expected_json, "{kind} canonical JSON drifted");
+            assert_eq!(
+                message_identity(domain.as_bytes(), &value).expect("wire identity"),
+                expected_identity,
+                "{kind} identity drifted"
+            );
         }
     }
 }
