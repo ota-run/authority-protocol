@@ -47,6 +47,7 @@ pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
 
 pub const CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.challenge.v1\0";
 pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.v1\0";
+pub const BROKER_BINDING_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.binding.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const AUTHORIZATION_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/authorization-request/v1";
@@ -341,6 +342,10 @@ mod tests {
 
     #[test]
     fn canonical_domain_and_identity_vectors_are_stable() {
+        assert_eq!(
+            BROKER_BINDING_IDENTITY_DOMAIN_V1,
+            b"ota.crossing-broker.binding.v1\0"
+        );
         assert_eq!(
             [
                 CHALLENGE_REQUEST_DOMAIN_V1,
