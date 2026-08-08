@@ -148,9 +148,12 @@ can execute:
 - `OtaProcessPostureV1` is an adapter-local pre-authority record for measured
   `no_new_privs`, non-dumpable, and ptracer-clear posture. A launcher must corroborate it; the
   Ota-authored record is never sufficient authority by itself.
-- `SystemdProtectedLauncherInstanceEvidenceV1` carries the complete mapping, process posture, fixed
-  profile identities, and bounded invocation identities needed to rederive the signed launcher
-  instance during receipt-history verification.
+- `SystemdProtectedLauncherInstanceEvidenceV1` carries the immutable mapping, process posture,
+  fixed profile identities, and bounded invocation identities. The additive
+  `SystemdProtectedLauncherInstanceEvidenceV2` binds that V1 record to the complete ordered
+  launcher and job-principal observation sets. Its identity derivation rejects missing,
+  reordered, failed, substituted, or unrecognized observations before an attestation can claim
+  the closed profile.
 - `ota.authority-launcher.systemd/v1` fixes the ordered service/socket hardening semantics and
   evidence sources. Its profile identity is
   `sha256:32c49f19799e065d341c900a4ce0d7756669c0c0d4e990ffe81bbcda06291930`.

@@ -37,3 +37,5 @@
   principal mapping, adapter-local Ota process posture, archive-rederivable instance evidence, and
   closed launcher/job-principal profile definitions with requirement-specific evidence methods.
   This adds no executable launcher or provider-attested claim.
+- Add an additive systemd protected-launcher instance v2 record that binds the V1 identity
+  foundation to every ordered verified launcher and job-principal profile observation.

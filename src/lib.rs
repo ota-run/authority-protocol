@@ -66,6 +66,8 @@ pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.job-principal-profile.v1\0";
 pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.instance.v1\0";
+pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.authority-launcher.instance.v2\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -383,6 +385,35 @@ pub struct SystemdProtectedLauncherInstanceEvidenceV1 {
     pub systemd_invocation_identity: String,
     pub working_directory_identity: String,
     pub child_process_identity: String,
+}
+
+/// Complete systemd protected-launcher evidence. V1 remains the immutable identity foundation;
+/// V2 adds the closed profile observations required for a production attestation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdProtectedLauncherInstanceEvidenceV2 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub instance_v1: SystemdProtectedLauncherInstanceEvidenceV1,
+    pub launcher_observations: Vec<SystemdLauncherObservation>,
+    pub job_principal_observations: Vec<SystemdJobPrincipalObservation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdLauncherObservation {
+    pub source: SystemdLauncherEvidenceSource,
+    pub state: RuntimeBoundaryObservationState,
+    pub reason_code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdJobPrincipalObservation {
+    pub requirement: SystemdJobPrincipalRequirement,
+    pub evidence_methods: Vec<SystemdJobPrincipalEvidenceMethod>,
+    pub state: RuntimeBoundaryObservationState,
+    pub reason_code: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -906,6 +937,15 @@ pub fn systemd_protected_launcher_instance_identity(
     message_identity(SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V1, &canonical)
 }
 
+pub fn systemd_protected_launcher_instance_v2_identity(
+    instance: &SystemdProtectedLauncherInstanceEvidenceV2,
+) -> Result<String, ProtocolError> {
+    validate_systemd_protected_launcher_instance_v2(instance)?;
+    let mut canonical = instance.clone();
+    canonical.identity.clear();
+    message_identity(SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2, &canonical)
+}
+
 fn runtime_boundary_requirement(
     name: RuntimeBoundaryObservationName,
     evidence_method: RuntimeBoundaryEvidenceMethod,
@@ -995,6 +1035,48 @@ fn validate_systemd_protected_launcher_instance_v1(
     Ok(())
 }
 
+fn validate_systemd_protected_launcher_instance_v2(
+    instance: &SystemdProtectedLauncherInstanceEvidenceV2,
+) -> Result<(), ProtocolError> {
+    validate_systemd_protected_launcher_instance_v1(&instance.instance_v1)?;
+    if instance.instance_v1.identity
+        != systemd_protected_launcher_instance_identity(&instance.instance_v1)?
+        || instance.schema_version != 2
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let launcher_profile = systemd_launcher_profile_v1();
+    if instance.launcher_observations.len() != launcher_profile.evidence_sources.len()
+        || instance
+            .launcher_observations
+            .iter()
+            .zip(launcher_profile.evidence_sources.iter())
+            .any(|(observed, required)| {
+                observed.source != *required
+                    || observed.state != RuntimeBoundaryObservationState::Verified
+                    || !is_reason_code(&observed.reason_code)
+            })
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let job_profile = systemd_job_principal_profile_v1();
+    if instance.job_principal_observations.len() != job_profile.requirements.len()
+        || instance
+            .job_principal_observations
+            .iter()
+            .zip(job_profile.requirements.iter())
+            .any(|(observed, required)| {
+                observed.requirement != required.requirement
+                    || observed.evidence_methods != required.evidence_methods
+                    || observed.state != RuntimeBoundaryObservationState::Verified
+                    || !is_reason_code(&observed.reason_code)
+            })
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
 fn principal_is_uniform_non_root(principal: &UnixPrincipalIdentity) -> bool {
     principal.real_uid != 0
         && principal.real_gid != 0
@@ -1012,6 +1094,14 @@ fn is_sha256_identity(value: &str) -> bool {
         && value[7..]
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_reason_code(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'@' | b'-')
+        })
 }
 
 pub fn nonce_commitment(nonce: &[u8]) -> String {
@@ -1404,6 +1494,49 @@ mod tests {
             systemd_protected_launcher_instance_identity(&instance)
                 .expect("stable launcher instance identity"),
             instance.identity
+        );
+        let mut complete = SystemdProtectedLauncherInstanceEvidenceV2 {
+            schema_version: 2,
+            identity: String::new(),
+            instance_v1: instance.clone(),
+            launcher_observations: systemd_launcher_profile_v1()
+                .evidence_sources
+                .into_iter()
+                .map(|source| SystemdLauncherObservation {
+                    source,
+                    state: RuntimeBoundaryObservationState::Verified,
+                    reason_code: String::from("verified_by_systemd_protected_launcher"),
+                })
+                .collect(),
+            job_principal_observations: systemd_job_principal_profile_v1()
+                .requirements
+                .into_iter()
+                .map(|required| SystemdJobPrincipalObservation {
+                    requirement: required.requirement,
+                    evidence_methods: required.evidence_methods,
+                    state: RuntimeBoundaryObservationState::Verified,
+                    reason_code: String::from("verified_by_systemd_protected_launcher"),
+                })
+                .collect(),
+        };
+        complete.identity = systemd_protected_launcher_instance_v2_identity(&complete)
+            .expect("complete launcher instance identity");
+        assert_eq!(
+            systemd_protected_launcher_instance_v2_identity(&complete)
+                .expect("stable complete launcher instance identity"),
+            complete.identity
+        );
+        let mut missing = complete.clone();
+        missing.launcher_observations.pop();
+        assert_eq!(
+            systemd_protected_launcher_instance_v2_identity(&missing),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut reordered = complete.clone();
+        reordered.job_principal_observations.swap(0, 1);
+        assert_eq!(
+            systemd_protected_launcher_instance_v2_identity(&reordered),
+            Err(ProtocolError::InvalidRecord)
         );
         let mut substituted = instance.clone();
         substituted.process_posture.principal_mapping_identity =
