@@ -38,6 +38,8 @@ This repository owns:
 - protocol version and message-kind constants;
 - exact serialized request, attestation, decision, lease, and consumption types;
 - additive runtime-boundary attestation v2 types and canonical protected-launcher profiles;
+- immutable principal-mapping, Ota process-posture, and systemd launcher-profile foundations for
+  the planned production protected-launcher adapter;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
 - compatibility and adversarial conformance tests.
@@ -132,6 +134,33 @@ these profiles.
 Every JSON payload is carried in one frame: a four-byte unsigned big-endian payload length followed
 by at most 64 KiB of UTF-8 JSON. Signed-message and identity domains are fixed protocol constants;
 this crate canonicalizes bytes and publishes profile identities but does not select trust roots.
+
+## Production launcher foundations
+
+The planned `systemd_protected_launcher/v1` adapter keeps broker semantics unchanged. This crate
+publishes only the immutable records that Core and the launcher must agree on before that adapter
+can execute:
+
+- `LauncherPrincipalMappingV1` binds one protected job-peer identity to one distinct execution
+  identity plus the fixed job-principal profile and launcher-session binding. Its identity is used
+  as the existing broker `runner_principal`, so authorization covers the complete mapping rather
+  than one caller label. The outer instance evidence separately binds the launcher profile.
+- `OtaProcessPostureV1` is an adapter-local pre-authority record for measured
+  `no_new_privs`, non-dumpable, and ptracer-clear posture. A launcher must corroborate it; the
+  Ota-authored record is never sufficient authority by itself.
+- `SystemdProtectedLauncherInstanceEvidenceV1` carries the complete mapping, process posture, fixed
+  profile identities, and bounded invocation identities needed to rederive the signed launcher
+  instance during receipt-history verification.
+- `ota.authority-launcher.systemd/v1` fixes the ordered service/socket hardening semantics and
+  evidence sources. Its profile identity is
+  `sha256:32c49f19799e065d341c900a4ce0d7756669c0c0d4e990ffe81bbcda06291930`.
+- `ota.authority-job-principal.systemd/v1` fixes the ordered job-peer, execution-principal,
+  privilege, process-containment, and process-inspection requirements. Its profile identity is
+  `sha256:e69ef375070bbb4f5616ba46b6f29b9a987372909016d1a1dfa40a5d4daae93d`.
+
+These definitions do not implement systemd, inspect a host, hold an attestor key, or create a
+provider claim. Core and authority-launcher must pin the same immutable protocol revision and
+independently verify their respective boundaries before the adapter can be enabled.
 
 ## Status
 

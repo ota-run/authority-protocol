@@ -33,3 +33,7 @@
 - Add the distinct runtime-boundary attestation v2 wire model, protected-launcher profile
   definitions, content-addressed profile identities, and downgrade-resistant conformance vectors
   without changing the v1 launcher-attestation shape.
+- Add the planned production systemd protected-launcher foundation: content-addressed one-to-one
+  principal mapping, adapter-local Ota process posture, archive-rederivable instance evidence, and
+  closed launcher/job-principal profile definitions with requirement-specific evidence methods.
+  This adds no executable launcher or provider-attested claim.

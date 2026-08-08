@@ -35,6 +35,10 @@ pub const RUNTIME_BOUNDARY_SCHEMA_VERSION_V1: u32 = 1;
 pub const PROTECTED_LAUNCHER_PROFILE_ID_V1: &str = "ota.runtime-boundary.protected-launcher/v1";
 pub const PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1: &str =
     "ota.runtime-boundary.protected-launcher-image/v1";
+pub const SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1: &str = "systemd_protected_launcher/v1";
+pub const SYSTEMD_LAUNCHER_PROFILE_ID_V1: &str = "ota.authority-launcher.systemd/v1";
+pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1: &str = "ota.authority-job-principal.systemd/v1";
+pub const OTA_PROCESS_POSTURE: &str = "ota_process_posture";
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
@@ -53,6 +57,15 @@ pub const BROKER_BINDING_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.bindi
 pub const BROKER_BINDING_IDENTITY_DOMAIN_V2: &[u8] = b"ota.crossing-broker.binding.v2\0";
 pub const ATTESTATION_IDENTITY_DOMAIN_V2: &[u8] = b"ota.crossing-broker.attestation.v2\0";
 pub const RUNTIME_BOUNDARY_PROFILE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.runtime-boundary.profile.v1\0";
+pub const LAUNCHER_PRINCIPAL_MAPPING_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.launcher.principal-mapping.v1\0";
+pub const OTA_PROCESS_POSTURE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.launcher.process-posture.v1\0";
+pub const SYSTEMD_LAUNCHER_PROFILE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.systemd-profile.v1\0";
+pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.job-principal-profile.v1\0";
+pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.instance.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -234,6 +247,146 @@ pub struct SignedLauncherAttestationV2 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct UnixPrincipalIdentity {
+    pub real_uid: u32,
+    pub effective_uid: u32,
+    pub saved_uid: u32,
+    pub filesystem_uid: u32,
+    pub real_gid: u32,
+    pub effective_gid: u32,
+    pub saved_gid: u32,
+    pub filesystem_gid: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherPrincipalMappingV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub job_peer: UnixPrincipalIdentity,
+    pub execution: UnixPrincipalIdentity,
+    pub job_principal_profile_identity: String,
+    pub launcher_session_binding_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OtaProcessPostureV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub pid: u32,
+    pub process_start_time_identity: String,
+    pub ota_binary_identity: String,
+    pub no_new_privs: bool,
+    pub dumpable: u32,
+    pub ptracer_clear_applied: bool,
+    pub principal_mapping_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdProfileSetting {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemdLauncherEvidenceSource {
+    ProtectedFileIdentity,
+    SystemdManagerProperty,
+    SocketPeerCredentials,
+    ProcProcessStatus,
+    ProcDescriptorInspection,
+    ProcUnixSocketInspection,
+    TargetPrincipalAccessProbe,
+    OtaProcessPosture,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdLauncherProfileDefinitionV1 {
+    pub schema_version: u32,
+    pub profile_id: String,
+    pub service_settings: Vec<SystemdProfileSetting>,
+    pub socket_settings: Vec<SystemdProfileSetting>,
+    pub invocation_scope_settings: Vec<SystemdProfileSetting>,
+    pub evidence_sources: Vec<SystemdLauncherEvidenceSource>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemdJobPrincipalRequirement {
+    DistinctOneToOnePrincipals,
+    PeerIdentityMatchesProtectedMapping,
+    PeerNoNewPrivileges,
+    PeerCapabilitiesEmpty,
+    PeerSupplementaryGroupsEmpty,
+    RunnerServiceIdentityBound,
+    AllPrincipalProcessesContained,
+    AccountsLocked,
+    NonLoginShells,
+    SudoPolicyDenied,
+    SystemdPolicyDenied,
+    PolkitPolicyDenied,
+    ProtectedPathsWriteDenied,
+    HostControlSocketsDenied,
+    ExecutionLauncherSocketDenied,
+    OtaProcessNonDumpable,
+    OtaPtracerCleared,
+    OtaProcessInspectionDenied,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemdJobPrincipalEvidenceMethod {
+    ProtectedMappingConfiguration,
+    ProcPeerStatus,
+    ProtectedRunnerServiceIdentity,
+    ProcPrincipalCgroupEnumeration,
+    AccountDatabaseInspection,
+    SudoPolicyQuery,
+    SystemdManagerAuthorizationQuery,
+    PolkitAuthorizationQuery,
+    TargetPrincipalAccessProbe,
+    OtaProcessPosture,
+    ProcessAccessProbe,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdJobPrincipalRequirementDefinition {
+    pub requirement: SystemdJobPrincipalRequirement,
+    pub evidence_methods: Vec<SystemdJobPrincipalEvidenceMethod>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdJobPrincipalProfileDefinitionV1 {
+    pub schema_version: u32,
+    pub profile_id: String,
+    pub requirements: Vec<SystemdJobPrincipalRequirementDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemdProtectedLauncherInstanceEvidenceV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub adapter: String,
+    pub principal_mapping: LauncherPrincipalMappingV1,
+    pub process_posture: OtaProcessPostureV1,
+    pub systemd_launcher_profile_identity: String,
+    pub systemd_job_principal_profile_identity: String,
+    pub launcher_session_binding_identity: String,
+    pub systemd_invocation_identity: String,
+    pub working_directory_identity: String,
+    pub child_process_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SignedBrokerMessage<T> {
     pub payload: T,
     pub key_id: String,
@@ -395,6 +548,8 @@ pub enum ProtocolError {
     IncompleteFrame,
     #[error("authority protocol canonicalization failed")]
     Canonicalization,
+    #[error("authority protocol record is semantically invalid")]
+    InvalidRecord,
 }
 
 pub fn encode_frame(payload: &[u8]) -> Result<Vec<u8>, ProtocolError> {
@@ -551,6 +706,206 @@ pub fn launcher_attestation_identity_v2(
     message_identity(ATTESTATION_IDENTITY_DOMAIN_V2, attestation)
 }
 
+pub fn launcher_principal_mapping_identity(
+    mapping: &LauncherPrincipalMappingV1,
+) -> Result<String, ProtocolError> {
+    validate_principal_mapping_v1(mapping)?;
+    let mut canonical = mapping.clone();
+    canonical.identity.clear();
+    message_identity(LAUNCHER_PRINCIPAL_MAPPING_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn ota_process_posture_identity(
+    posture: &OtaProcessPostureV1,
+) -> Result<String, ProtocolError> {
+    validate_ota_process_posture_v1(posture)?;
+    let mut canonical = posture.clone();
+    canonical.identity.clear();
+    message_identity(OTA_PROCESS_POSTURE_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn systemd_launcher_profile_v1() -> SystemdLauncherProfileDefinitionV1 {
+    SystemdLauncherProfileDefinitionV1 {
+        schema_version: 1,
+        profile_id: SYSTEMD_LAUNCHER_PROFILE_ID_V1.into(),
+        service_settings: vec![
+            systemd_setting("User", "root"),
+            systemd_setting("Group", "root"),
+            systemd_setting("SupplementaryGroups", ""),
+            systemd_setting("AmbientCapabilities", ""),
+            systemd_setting("UMask", "0077"),
+            systemd_setting("NoNewPrivileges", "yes"),
+            systemd_setting("RestrictSUIDSGID", "yes"),
+            systemd_setting("LockPersonality", "yes"),
+            systemd_setting("MemoryDenyWriteExecute", "no"),
+            systemd_setting("RestrictRealtime", "yes"),
+            systemd_setting("SystemCallArchitectures", "native"),
+            systemd_setting("CapabilityBoundingSet", "CAP_SETUID CAP_SETGID CAP_KILL"),
+            systemd_setting("PrivateTmp", "yes"),
+            systemd_setting("PrivateDevices", "yes"),
+            systemd_setting("ProtectSystem", "strict"),
+            systemd_setting("ProtectHome", "read-only"),
+            systemd_setting("ProtectKernelTunables", "yes"),
+            systemd_setting("ProtectKernelModules", "yes"),
+            systemd_setting("ProtectKernelLogs", "yes"),
+            systemd_setting("ProtectClock", "yes"),
+            systemd_setting("ProtectControlGroups", "yes"),
+            systemd_setting("ProtectProc", "invisible"),
+            systemd_setting("ProcSubset", "pid"),
+            systemd_setting("RestrictAddressFamilies", "AF_UNIX AF_INET AF_INET6"),
+            systemd_setting("RestrictNamespaces", "yes"),
+            systemd_setting(
+                "ReadOnlyPaths",
+                "/etc/ota <installation_manifest> <unit_and_dropin_files> <launcher_and_ota_executables> <encrypted_credential_source> <broker_proxy_socket_metadata> <service_credential_directory>",
+            ),
+            systemd_setting(
+                "ReadWritePaths",
+                "/run/ota/authority-launcher /var/lib/ota/authority-launcher <allowed_repository_roots>",
+            ),
+            systemd_setting(
+                "LoadCredentialEncrypted",
+                "<attestor_credential_name>:<encrypted_attestor_credential_source>",
+            ),
+            systemd_setting("KillMode", "control-group"),
+        ],
+        socket_settings: vec![
+            systemd_setting("Accept", "no"),
+            systemd_setting("ListenStream", "/run/ota/authority-launcher.sock"),
+            systemd_setting("SocketUser", "root"),
+            systemd_setting("SocketGroup", "<job_peer_gid>"),
+            systemd_setting("SocketMode", "0660"),
+            systemd_setting("RemoveOnStop", "yes"),
+            systemd_setting("Service", "ota-authority-launcher.service"),
+        ],
+        invocation_scope_settings: vec![
+            systemd_setting("Slice", "ota-authority-invocations.slice"),
+            systemd_setting("PIDs", "<stopped_child_pid>"),
+            systemd_setting("Delegate", "no"),
+            systemd_setting("KillMode", "control-group"),
+            systemd_setting("CollectMode", "inactive-or-failed"),
+        ],
+        evidence_sources: vec![
+            SystemdLauncherEvidenceSource::ProtectedFileIdentity,
+            SystemdLauncherEvidenceSource::SystemdManagerProperty,
+            SystemdLauncherEvidenceSource::SocketPeerCredentials,
+            SystemdLauncherEvidenceSource::ProcProcessStatus,
+            SystemdLauncherEvidenceSource::ProcDescriptorInspection,
+            SystemdLauncherEvidenceSource::ProcUnixSocketInspection,
+            SystemdLauncherEvidenceSource::TargetPrincipalAccessProbe,
+            SystemdLauncherEvidenceSource::OtaProcessPosture,
+        ],
+    }
+}
+
+pub fn systemd_job_principal_profile_v1() -> SystemdJobPrincipalProfileDefinitionV1 {
+    use SystemdJobPrincipalEvidenceMethod as Evidence;
+    use SystemdJobPrincipalRequirement as Requirement;
+
+    SystemdJobPrincipalProfileDefinitionV1 {
+        schema_version: 1,
+        profile_id: SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1.into(),
+        requirements: vec![
+            job_principal_requirement(
+                Requirement::DistinctOneToOnePrincipals,
+                &[
+                    Evidence::ProtectedMappingConfiguration,
+                    Evidence::ProcPeerStatus,
+                    Evidence::AccountDatabaseInspection,
+                ],
+            ),
+            job_principal_requirement(
+                Requirement::PeerIdentityMatchesProtectedMapping,
+                &[
+                    Evidence::ProtectedMappingConfiguration,
+                    Evidence::ProcPeerStatus,
+                ],
+            ),
+            job_principal_requirement(
+                Requirement::PeerNoNewPrivileges,
+                &[Evidence::ProcPeerStatus],
+            ),
+            job_principal_requirement(
+                Requirement::PeerCapabilitiesEmpty,
+                &[Evidence::ProcPeerStatus],
+            ),
+            job_principal_requirement(
+                Requirement::PeerSupplementaryGroupsEmpty,
+                &[Evidence::ProcPeerStatus],
+            ),
+            job_principal_requirement(
+                Requirement::RunnerServiceIdentityBound,
+                &[Evidence::ProtectedRunnerServiceIdentity],
+            ),
+            job_principal_requirement(
+                Requirement::AllPrincipalProcessesContained,
+                &[Evidence::ProcPrincipalCgroupEnumeration],
+            ),
+            job_principal_requirement(
+                Requirement::AccountsLocked,
+                &[Evidence::AccountDatabaseInspection],
+            ),
+            job_principal_requirement(
+                Requirement::NonLoginShells,
+                &[Evidence::AccountDatabaseInspection],
+            ),
+            job_principal_requirement(Requirement::SudoPolicyDenied, &[Evidence::SudoPolicyQuery]),
+            job_principal_requirement(
+                Requirement::SystemdPolicyDenied,
+                &[Evidence::SystemdManagerAuthorizationQuery],
+            ),
+            job_principal_requirement(
+                Requirement::PolkitPolicyDenied,
+                &[Evidence::PolkitAuthorizationQuery],
+            ),
+            job_principal_requirement(
+                Requirement::ProtectedPathsWriteDenied,
+                &[Evidence::TargetPrincipalAccessProbe],
+            ),
+            job_principal_requirement(
+                Requirement::HostControlSocketsDenied,
+                &[Evidence::TargetPrincipalAccessProbe],
+            ),
+            job_principal_requirement(
+                Requirement::ExecutionLauncherSocketDenied,
+                &[Evidence::TargetPrincipalAccessProbe],
+            ),
+            job_principal_requirement(
+                Requirement::OtaProcessNonDumpable,
+                &[Evidence::OtaProcessPosture, Evidence::ProcessAccessProbe],
+            ),
+            job_principal_requirement(
+                Requirement::OtaPtracerCleared,
+                &[Evidence::OtaProcessPosture, Evidence::ProcessAccessProbe],
+            ),
+            job_principal_requirement(
+                Requirement::OtaProcessInspectionDenied,
+                &[Evidence::ProcessAccessProbe],
+            ),
+        ],
+    }
+}
+
+pub fn systemd_launcher_profile_identity(
+    profile: &SystemdLauncherProfileDefinitionV1,
+) -> Result<String, ProtocolError> {
+    message_identity(SYSTEMD_LAUNCHER_PROFILE_IDENTITY_DOMAIN_V1, profile)
+}
+
+pub fn systemd_job_principal_profile_identity(
+    profile: &SystemdJobPrincipalProfileDefinitionV1,
+) -> Result<String, ProtocolError> {
+    message_identity(SYSTEMD_JOB_PRINCIPAL_PROFILE_IDENTITY_DOMAIN_V1, profile)
+}
+
+pub fn systemd_protected_launcher_instance_identity(
+    instance: &SystemdProtectedLauncherInstanceEvidenceV1,
+) -> Result<String, ProtocolError> {
+    validate_systemd_protected_launcher_instance_v1(instance)?;
+    let mut canonical = instance.clone();
+    canonical.identity.clear();
+    message_identity(SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V1, &canonical)
+}
+
 fn runtime_boundary_requirement(
     name: RuntimeBoundaryObservationName,
     evidence_method: RuntimeBoundaryEvidenceMethod,
@@ -561,6 +916,102 @@ fn runtime_boundary_requirement(
         evidence_method,
         semantic_identity,
     }
+}
+
+fn systemd_setting(name: &str, value: &str) -> SystemdProfileSetting {
+    SystemdProfileSetting {
+        name: name.into(),
+        value: value.into(),
+    }
+}
+
+fn job_principal_requirement(
+    requirement: SystemdJobPrincipalRequirement,
+    evidence_methods: &[SystemdJobPrincipalEvidenceMethod],
+) -> SystemdJobPrincipalRequirementDefinition {
+    SystemdJobPrincipalRequirementDefinition {
+        requirement,
+        evidence_methods: evidence_methods.to_vec(),
+    }
+}
+
+fn validate_principal_mapping_v1(
+    mapping: &LauncherPrincipalMappingV1,
+) -> Result<(), ProtocolError> {
+    if mapping.schema_version != 1
+        || !principal_is_uniform_non_root(&mapping.job_peer)
+        || !principal_is_uniform_non_root(&mapping.execution)
+        || mapping.job_peer.real_uid == mapping.execution.real_uid
+        || mapping.job_peer.real_gid == mapping.execution.real_gid
+        || !is_sha256_identity(&mapping.job_principal_profile_identity)
+        || !is_sha256_identity(&mapping.launcher_session_binding_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+fn validate_ota_process_posture_v1(posture: &OtaProcessPostureV1) -> Result<(), ProtocolError> {
+    if posture.schema_version != 1
+        || posture.message_kind != OTA_PROCESS_POSTURE
+        || posture.pid == 0
+        || !is_sha256_identity(&posture.process_start_time_identity)
+        || !is_sha256_identity(&posture.ota_binary_identity)
+        || !posture.no_new_privs
+        || posture.dumpable != 0
+        || !posture.ptracer_clear_applied
+        || !is_sha256_identity(&posture.principal_mapping_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+fn validate_systemd_protected_launcher_instance_v1(
+    instance: &SystemdProtectedLauncherInstanceEvidenceV1,
+) -> Result<(), ProtocolError> {
+    let mapping_identity = launcher_principal_mapping_identity(&instance.principal_mapping)?;
+    let posture_identity = ota_process_posture_identity(&instance.process_posture)?;
+    let launcher_profile_identity =
+        systemd_launcher_profile_identity(&systemd_launcher_profile_v1())?;
+    let job_profile_identity =
+        systemd_job_principal_profile_identity(&systemd_job_principal_profile_v1())?;
+    if instance.schema_version != 1
+        || instance.adapter != SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1
+        || instance.principal_mapping.identity != mapping_identity
+        || instance.process_posture.identity != posture_identity
+        || instance.process_posture.principal_mapping_identity != mapping_identity
+        || instance.systemd_launcher_profile_identity != launcher_profile_identity
+        || instance.systemd_job_principal_profile_identity != job_profile_identity
+        || instance.principal_mapping.job_principal_profile_identity != job_profile_identity
+        || instance.launcher_session_binding_identity
+            != instance.principal_mapping.launcher_session_binding_identity
+        || !is_sha256_identity(&instance.systemd_invocation_identity)
+        || !is_sha256_identity(&instance.working_directory_identity)
+        || !is_sha256_identity(&instance.child_process_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+fn principal_is_uniform_non_root(principal: &UnixPrincipalIdentity) -> bool {
+    principal.real_uid != 0
+        && principal.real_gid != 0
+        && principal.real_uid == principal.effective_uid
+        && principal.real_uid == principal.saved_uid
+        && principal.real_uid == principal.filesystem_uid
+        && principal.real_gid == principal.effective_gid
+        && principal.real_gid == principal.saved_gid
+        && principal.real_gid == principal.filesystem_gid
+}
+
+fn is_sha256_identity(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub fn nonce_commitment(nonce: &[u8]) -> String {
@@ -757,6 +1208,210 @@ mod tests {
             Some(base)
         );
         assert!(runtime_boundary_profile_by_id("unknown-profile").is_none());
+    }
+
+    #[test]
+    fn systemd_launcher_profiles_are_closed_ordered_and_content_addressed() {
+        let launcher = systemd_launcher_profile_v1();
+        let principal = systemd_job_principal_profile_v1();
+
+        assert_eq!(launcher.schema_version, 1);
+        assert_eq!(launcher.profile_id, SYSTEMD_LAUNCHER_PROFILE_ID_V1);
+        assert_eq!(launcher.service_settings.len(), 29);
+        assert_eq!(launcher.socket_settings.len(), 7);
+        assert_eq!(launcher.invocation_scope_settings.len(), 5);
+        assert_eq!(launcher.evidence_sources.len(), 8);
+        assert_eq!(principal.schema_version, 1);
+        assert_eq!(principal.profile_id, SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1);
+        assert_eq!(principal.requirements.len(), 18);
+
+        let launcher_identity =
+            systemd_launcher_profile_identity(&launcher).expect("launcher profile identity");
+        let principal_identity = systemd_job_principal_profile_identity(&principal)
+            .expect("job principal profile identity");
+        assert_eq!(
+            launcher_identity,
+            "sha256:32c49f19799e065d341c900a4ce0d7756669c0c0d4e990ffe81bbcda06291930"
+        );
+        assert_eq!(
+            principal_identity,
+            "sha256:e69ef375070bbb4f5616ba46b6f29b9a987372909016d1a1dfa40a5d4daae93d"
+        );
+    }
+
+    #[test]
+    fn principal_mapping_and_process_posture_identities_are_self_excluding() {
+        let job_peer = UnixPrincipalIdentity {
+            real_uid: 1001,
+            effective_uid: 1001,
+            saved_uid: 1001,
+            filesystem_uid: 1001,
+            real_gid: 1001,
+            effective_gid: 1001,
+            saved_gid: 1001,
+            filesystem_gid: 1001,
+        };
+        let execution = UnixPrincipalIdentity {
+            real_uid: 1002,
+            effective_uid: 1002,
+            saved_uid: 1002,
+            filesystem_uid: 1002,
+            real_gid: 1002,
+            effective_gid: 1002,
+            saved_gid: 1002,
+            filesystem_gid: 1002,
+        };
+        let mut mapping = LauncherPrincipalMappingV1 {
+            schema_version: 1,
+            identity: String::new(),
+            job_peer,
+            execution,
+            job_principal_profile_identity: systemd_job_principal_profile_identity(
+                &systemd_job_principal_profile_v1(),
+            )
+            .expect("job principal profile identity"),
+            launcher_session_binding_identity:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+        };
+        mapping.identity =
+            launcher_principal_mapping_identity(&mapping).expect("principal mapping identity");
+        assert_eq!(
+            launcher_principal_mapping_identity(&mapping).expect("stable mapping identity"),
+            mapping.identity
+        );
+
+        let mut changed = mapping.clone();
+        changed.execution.real_uid = 1003;
+        changed.execution.effective_uid = 1003;
+        changed.execution.saved_uid = 1003;
+        changed.execution.filesystem_uid = 1003;
+        assert_ne!(
+            launcher_principal_mapping_identity(&changed).expect("changed mapping identity"),
+            mapping.identity
+        );
+
+        let mut posture = OtaProcessPostureV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: OTA_PROCESS_POSTURE.into(),
+            pid: 4242,
+            process_start_time_identity:
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            ota_binary_identity:
+                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into(),
+            no_new_privs: true,
+            dumpable: 0,
+            ptracer_clear_applied: true,
+            principal_mapping_identity: mapping.identity.clone(),
+        };
+        posture.identity =
+            ota_process_posture_identity(&posture).expect("process posture identity");
+        assert_eq!(
+            ota_process_posture_identity(&posture).expect("stable posture identity"),
+            posture.identity
+        );
+
+        let value = serde_json::to_value(&posture).expect("process posture JSON");
+        assert!(serde_json::from_value::<OtaProcessPostureV1>(value).is_ok());
+        let mut unknown = serde_json::to_value(&posture).expect("process posture JSON");
+        unknown["caller_label"] = serde_json::json!("untrusted");
+        assert!(serde_json::from_value::<OtaProcessPostureV1>(unknown).is_err());
+
+        for invalid in [
+            {
+                let mut value = mapping.clone();
+                value.schema_version = 2;
+                value
+            },
+            {
+                let mut value = mapping.clone();
+                value.execution = value.job_peer.clone();
+                value
+            },
+            {
+                let mut value = mapping.clone();
+                value.execution.effective_uid += 1;
+                value
+            },
+            {
+                let mut value = mapping.clone();
+                value.job_principal_profile_identity =
+                    "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                        .into();
+                value
+            },
+        ] {
+            assert_eq!(
+                launcher_principal_mapping_identity(&invalid),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        for invalid in [
+            {
+                let mut value = posture.clone();
+                value.schema_version = 2;
+                value
+            },
+            {
+                let mut value = posture.clone();
+                value.message_kind = "challenge_request".into();
+                value
+            },
+            {
+                let mut value = posture.clone();
+                value.dumpable = 1;
+                value
+            },
+            {
+                let mut value = posture.clone();
+                value.ptracer_clear_applied = false;
+                value
+            },
+        ] {
+            assert_eq!(
+                ota_process_posture_identity(&invalid),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        let mut instance = SystemdProtectedLauncherInstanceEvidenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            adapter: SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1.into(),
+            principal_mapping: mapping,
+            process_posture: posture,
+            systemd_launcher_profile_identity: systemd_launcher_profile_identity(
+                &systemd_launcher_profile_v1(),
+            )
+            .expect("launcher profile identity"),
+            systemd_job_principal_profile_identity: systemd_job_principal_profile_identity(
+                &systemd_job_principal_profile_v1(),
+            )
+            .expect("job principal profile identity"),
+            launcher_session_binding_identity:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            systemd_invocation_identity:
+                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
+            working_directory_identity:
+                "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into(),
+            child_process_identity:
+                "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),
+        };
+        instance.identity = systemd_protected_launcher_instance_identity(&instance)
+            .expect("launcher instance identity");
+        assert_eq!(
+            systemd_protected_launcher_instance_identity(&instance)
+                .expect("stable launcher instance identity"),
+            instance.identity
+        );
+        let mut substituted = instance.clone();
+        substituted.process_posture.principal_mapping_identity =
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into();
+        assert_eq!(
+            systemd_protected_launcher_instance_identity(&substituted),
+            Err(ProtocolError::InvalidRecord)
+        );
     }
 
     #[test]
