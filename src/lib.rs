@@ -39,6 +39,8 @@ pub const AUTHORIZATION_DECISION: &str = "authorization_decision";
 pub const LEASE_ISSUANCE: &str = "lease_issuance";
 pub const LEASE_CONSUME: &str = "lease_consume";
 pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
+pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
+pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 
 pub const CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.challenge.v1\0";
 pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.v1\0";
@@ -50,6 +52,10 @@ pub const AUTHORIZATION_DECISION_DOMAIN_V1: &str = "ota-crossing-broker/authoriz
 pub const LEASE_ISSUANCE_DOMAIN_V1: &str = "ota-crossing-broker/lease-issuance/v1";
 pub const LEASE_CONSUME_DOMAIN_V1: &str = "ota-crossing-broker/lease-consume/v1";
 pub const LEASE_CONSUME_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/lease-consume-response/v1";
+pub const LEASE_CONSUMPTION_QUERY_DOMAIN_V1: &str =
+    "ota-crossing-broker/lease-consumption-query/v1";
+pub const LEASE_CONSUMPTION_STATUS_DOMAIN_V1: &str =
+    "ota-crossing-broker/lease-consumption-status/v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -200,6 +206,52 @@ pub struct LeaseConsumeResponsePayload {
     pub consumed_at: String,
 }
 
+/// Fresh-session query for the terminal status of one exact prior consume request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseConsumptionQuery {
+    pub message_kind: String,
+    pub binding_identity: String,
+    pub attestation_identity: String,
+    pub recovery_challenge_nonce_commitment: String,
+    pub recovery_work_unit_identity: String,
+    pub lease_identity: String,
+    pub consume_request_identity: String,
+    pub original_work_unit_identity: String,
+    pub crossing_transaction_id: String,
+    pub crossing_transaction_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LeaseConsumptionStatus {
+    Consumed {
+        consume_response: Box<SignedBrokerMessage<LeaseConsumeResponsePayload>>,
+    },
+    NotConsumed,
+    Unknown,
+}
+
+/// Broker-signed recovery result for one exact prior consume request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseConsumptionStatusPayload {
+    pub message_kind: String,
+    pub query_identity: String,
+    pub binding_identity: String,
+    pub attestation_identity: String,
+    pub recovery_challenge_nonce_commitment: String,
+    pub recovery_work_unit_identity: String,
+    pub lease_identity: String,
+    pub consume_request_identity: String,
+    pub original_work_unit_identity: String,
+    pub crossing_transaction_id: String,
+    pub crossing_transaction_identity: String,
+    pub broker_revision: u64,
+    pub observed_at: String,
+    pub status: LeaseConsumptionStatus,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ProtocolError {
     #[error("authority protocol frame exceeds the 64 KiB limit")]
@@ -322,6 +374,8 @@ mod tests {
                 LEASE_ISSUANCE,
                 LEASE_CONSUME,
                 LEASE_CONSUME_RESPONSE,
+                LEASE_CONSUMPTION_QUERY,
+                LEASE_CONSUMPTION_STATUS,
             ],
             [
                 "challenge_request",
@@ -331,6 +385,8 @@ mod tests {
                 "lease_issuance",
                 "lease_consume",
                 "lease_consume_response",
+                "lease_consumption_query",
+                "lease_consumption_status",
             ]
         );
     }
@@ -350,6 +406,8 @@ mod tests {
                 LEASE_ISSUANCE_DOMAIN_V1,
                 LEASE_CONSUME_DOMAIN_V1,
                 LEASE_CONSUME_RESPONSE_DOMAIN_V1,
+                LEASE_CONSUMPTION_QUERY_DOMAIN_V1,
+                LEASE_CONSUMPTION_STATUS_DOMAIN_V1,
             ],
             [
                 "ota-crossing-broker/challenge-request/v1",
@@ -359,6 +417,8 @@ mod tests {
                 "ota-crossing-broker/lease-issuance/v1",
                 "ota-crossing-broker/lease-consume/v1",
                 "ota-crossing-broker/lease-consume-response/v1",
+                "ota-crossing-broker/lease-consumption-query/v1",
+                "ota-crossing-broker/lease-consumption-status/v1",
             ]
         );
         let commitment = nonce_commitment(b"ota-protocol-vector-v1");
@@ -575,5 +635,84 @@ mod tests {
                 "{kind} identity drifted"
             );
         }
+    }
+
+    #[test]
+    fn consumption_recovery_wire_shapes_are_stable() {
+        let query = LeaseConsumptionQuery {
+            message_kind: LEASE_CONSUMPTION_QUERY.into(),
+            binding_identity: "binding".into(),
+            attestation_identity: "fresh-attestation".into(),
+            recovery_challenge_nonce_commitment: "fresh-nonce".into(),
+            recovery_work_unit_identity: "fresh-work".into(),
+            lease_identity: "lease".into(),
+            consume_request_identity: "consume".into(),
+            original_work_unit_identity: "original-work".into(),
+            crossing_transaction_id: "transaction-id".into(),
+            crossing_transaction_identity: "transaction".into(),
+        };
+        let original_response = SignedBrokerMessage {
+            payload: LeaseConsumeResponsePayload {
+                message_kind: LEASE_CONSUME_RESPONSE.into(),
+                consume_request_identity: "consume".into(),
+                binding_identity: "binding".into(),
+                lease_identity: "lease".into(),
+                challenge_nonce_commitment: "original-nonce".into(),
+                work_unit_identity: "original-work".into(),
+                crossing_transaction_id: "transaction-id".into(),
+                crossing_transaction_identity: "transaction".into(),
+                state: LeaseConsumeState::Consumed,
+                broker_revision: 8,
+                consumed_at: "2026-08-05T00:00:30Z".into(),
+            },
+            key_id: "broker-key".into(),
+            algorithm: "ed25519".into(),
+            signature: "consume-signature".into(),
+        };
+        let status = SignedBrokerMessage {
+            payload: LeaseConsumptionStatusPayload {
+                message_kind: LEASE_CONSUMPTION_STATUS.into(),
+                query_identity: "query".into(),
+                binding_identity: "binding".into(),
+                attestation_identity: "fresh-attestation".into(),
+                recovery_challenge_nonce_commitment: "fresh-nonce".into(),
+                recovery_work_unit_identity: "fresh-work".into(),
+                lease_identity: "lease".into(),
+                consume_request_identity: "consume".into(),
+                original_work_unit_identity: "original-work".into(),
+                crossing_transaction_id: "transaction-id".into(),
+                crossing_transaction_identity: "transaction".into(),
+                broker_revision: 9,
+                observed_at: "2026-08-05T00:00:40Z".into(),
+                status: LeaseConsumptionStatus::Consumed {
+                    consume_response: Box::new(original_response),
+                },
+            },
+            key_id: "broker-key".into(),
+            algorithm: "ed25519".into(),
+            signature: "status-signature".into(),
+        };
+        assert_eq!(
+            message_identity(LEASE_CONSUMPTION_QUERY_DOMAIN_V1.as_bytes(), &query)
+                .expect("query identity"),
+            "sha256:dfa49f07ccf68bfb64b3fb788f3fa5914f88398476776a497ba6e60012c98833"
+        );
+        assert_eq!(
+            signed_message_identity(LEASE_CONSUMPTION_STATUS_DOMAIN_V1.as_bytes(), &status)
+                .expect("status identity"),
+            "sha256:aca314f295c55eeafcb43c4a869824cdf3a47e32aa07ac0bb842f56da8e8dab7"
+        );
+        let consumed_json = serde_json::to_value(status).expect("consumed status JSON");
+        assert_eq!(
+            consumed_json
+                .pointer("/payload/status/state")
+                .and_then(serde_json::Value::as_str),
+            Some("consumed")
+        );
+        assert!(
+            consumed_json
+                .pointer("/payload/status/consume_response")
+                .is_some()
+        );
     }
 }

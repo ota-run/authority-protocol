@@ -82,12 +82,25 @@ sequenceDiagram
     else Authorization is denied, stale, or ambiguous
         Core->>Core: Refuse before governed execution
     end
+
+    opt Consume acknowledgement is uncertain
+        Core->>Launcher: Fresh challenge_request
+        Launcher-->>Core: Fresh attestation_response (signed)
+        Core->>Launcher: lease_consumption_query
+        Launcher->>Broker: Query exact prior consume request
+        Broker-->>Launcher: lease_consumption_status (signed)
+        Launcher-->>Core: Relay status and original signed consume response when consumed
+        Core->>Core: Finalize old work unit as incomplete; never resume its execution
+    end
 ```
 
 The seven wire messages, in order, are `challenge_request`, `attestation_response`,
 `authorization_request`, `authorization_decision`, `lease_issuance`, `lease_consume`, and
-`lease_consume_response`. Ota may execute the governed work unit only after it verifies a signed
-`lease_consume_response` bound to the pending crossing transaction.
+`lease_consume_response`. Recovery adds `lease_consumption_query` and
+`lease_consumption_status`. Ota may execute the governed work unit only after it verifies a signed
+`lease_consume_response` bound to the pending crossing transaction. Recovery never resumes that
+old work unit: it reconciles the broker result, finalizes the abandoned local transaction as
+incomplete, and requires a new authorization for any later execution.
 
 Every JSON payload is carried in one frame: a four-byte unsigned big-endian payload length followed
 by at most 64 KiB of UTF-8 JSON. Signed-message and identity domains are fixed protocol constants;
