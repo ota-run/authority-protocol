@@ -37,6 +37,7 @@ This repository owns:
 
 - protocol version and message-kind constants;
 - exact serialized request, attestation, decision, lease, and consumption types;
+- additive runtime-boundary attestation v2 types and canonical protected-launcher profiles;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
 - compatibility and adversarial conformance tests.
@@ -102,9 +103,35 @@ The seven wire messages, in order, are `challenge_request`, `attestation_respons
 old work unit: it reconciles the broker result, finalizes the abandoned local transaction as
 incomplete, and requires a new authorization for any later execution.
 
+## Runtime-boundary attestation
+
+The original `LauncherAttestationPayload` and v1 response domain remain immutable. They prove a
+fresh launcher session bound to the challenge, work unit, and semantic scope, but they do not prove
+strong runtime separation.
+
+The additive `LauncherAttestationPayloadV2` uses the distinct
+`ota-crossing-broker/attestation-response/v2` response domain and
+`ota.crossing-broker.attestation.v2\0` identity domain. It carries one signed runtime-boundary
+record with a stable profile ID, content-addressed profile identity, protected-launcher attestor
+identity, launcher-session binding, and an ordered closed set of observations.
+
+This crate publishes two canonical profile definitions:
+
+- `ota.runtime-boundary.protected-launcher/v1` requires eleven launcher and runtime-separation
+  observations.
+- `ota.runtime-boundary.protected-launcher-image/v1` adds bound runner-image and hardening-profile
+  identities.
+
+Every required observation must be represented with its profile-defined evidence method. The
+profile also requires bounded semantic identities for launcher binary/config measurements and,
+for the image profile, image/hardening-profile measurements; it forbids arbitrary identities on
+the remaining observations. Core, not this wire crate, owns trust-root selection, signature
+verification, refusal semantics, and archive reconciliation. Provider attestation is not part of
+these profiles.
+
 Every JSON payload is carried in one frame: a four-byte unsigned big-endian payload length followed
 by at most 64 KiB of UTF-8 JSON. Signed-message and identity domains are fixed protocol constants;
-this crate canonicalizes bytes but does not select trust roots.
+this crate canonicalizes bytes and publishes profile identities but does not select trust roots.
 
 ## Status
 

@@ -30,3 +30,6 @@
   conformance tests.
 - Add fresh-attestation-bound consumption-status query and response messages for fail-closed
   recovery after an uncertain lease-consume acknowledgement.
+- Add the distinct runtime-boundary attestation v2 wire model, protected-launcher profile
+  definitions, content-addressed profile identities, and downgrade-resistant conformance vectors
+  without changing the v1 launcher-attestation shape.
