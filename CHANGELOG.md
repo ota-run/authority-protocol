@@ -39,3 +39,5 @@
   This adds no executable launcher or provider-attested claim.
 - Add an additive systemd protected-launcher instance v2 record that binds the V1 identity
   foundation to every ordered verified launcher and job-principal profile observation.
+- Add a distinct systemd protected-launcher attestation v3 envelope and identity domain. It carries
+  only a complete instance v2 record and leaves v1/v2 attestation compatibility unchanged.

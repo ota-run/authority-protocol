@@ -131,6 +131,12 @@ the remaining observations. Core, not this wire crate, owns trust-root selection
 verification, refusal semantics, and archive reconciliation. Provider attestation is not part of
 these profiles.
 
+The distinct `LauncherAttestationPayloadV3` uses
+`ota-crossing-broker/attestation-response/v3` only for
+`systemd_protected_launcher/v1`. It carries a complete, content-addressed
+`SystemdProtectedLauncherInstanceEvidenceV2`; its identity helper refuses a missing,
+substituted, incomplete, or non-verified instance. V3 does not reinterpret v1 or v2 archives.
+
 Every JSON payload is carried in one frame: a four-byte unsigned big-endian payload length followed
 by at most 64 KiB of UTF-8 JSON. Signed-message and identity domains are fixed protocol constants;
 this crate canonicalizes bytes and publishes profile identities but does not select trust roots.

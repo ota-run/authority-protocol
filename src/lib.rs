@@ -31,6 +31,8 @@ use thiserror::Error;
 
 pub const PROTOCOL_VERSION_V1: &str = "ota-crossing-broker/v1";
 pub const RUNTIME_BOUNDARY_ATTESTATION_PROTOCOL_V2: &str = "ota-runtime-boundary-attestation/v2";
+pub const SYSTEMD_PROTECTED_LAUNCHER_ATTESTATION_PROTOCOL_V3: &str =
+    "ota-systemd-protected-launcher-attestation/v3";
 pub const RUNTIME_BOUNDARY_SCHEMA_VERSION_V1: u32 = 1;
 pub const PROTECTED_LAUNCHER_PROFILE_ID_V1: &str = "ota.runtime-boundary.protected-launcher/v1";
 pub const PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1: &str =
@@ -56,6 +58,7 @@ pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.
 pub const BROKER_BINDING_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.binding.v1\0";
 pub const BROKER_BINDING_IDENTITY_DOMAIN_V2: &[u8] = b"ota.crossing-broker.binding.v2\0";
 pub const ATTESTATION_IDENTITY_DOMAIN_V2: &[u8] = b"ota.crossing-broker.attestation.v2\0";
+pub const ATTESTATION_IDENTITY_DOMAIN_V3: &[u8] = b"ota.crossing-broker.attestation.v3\0";
 pub const RUNTIME_BOUNDARY_PROFILE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.runtime-boundary.profile.v1\0";
 pub const LAUNCHER_PRINCIPAL_MAPPING_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.launcher.principal-mapping.v1\0";
@@ -71,6 +74,7 @@ pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2: &[u8] =
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
+pub const ATTESTATION_RESPONSE_DOMAIN_V3: &str = "ota-crossing-broker/attestation-response/v3";
 pub const AUTHORIZATION_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/authorization-request/v1";
 pub const AUTHORIZATION_DECISION_DOMAIN_V1: &str = "ota-crossing-broker/authorization-decision/v1";
 pub const LEASE_ISSUANCE_DOMAIN_V1: &str = "ota-crossing-broker/lease-issuance/v1";
@@ -242,6 +246,38 @@ pub struct LauncherAttestationPayloadV2 {
 #[serde(deny_unknown_fields)]
 pub struct SignedLauncherAttestationV2 {
     pub payload: LauncherAttestationPayloadV2,
+    pub key_id: String,
+    pub algorithm: String,
+    pub signature: String,
+}
+
+/// Additive v3 attestation for the closed systemd protected-launcher profile.
+/// The v1 and v2 shapes remain immutable for archive compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherAttestationPayloadV3 {
+    pub message_kind: String,
+    pub attestation_protocol_version: String,
+    pub binding_identity: String,
+    pub challenge_nonce_commitment: String,
+    pub invocation_id: String,
+    pub work_unit_identity: String,
+    pub semantic_scope_identity: String,
+    pub runner_principal: String,
+    pub channel_delivery: String,
+    pub authenticated_origin: String,
+    pub authority_mounts: Vec<String>,
+    pub systemd_protected_launcher: SystemdProtectedLauncherInstanceEvidenceV2,
+    pub issuer: String,
+    pub audience: String,
+    pub issued_at: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedLauncherAttestationV3 {
+    pub payload: LauncherAttestationPayloadV3,
     pub key_id: String,
     pub algorithm: String,
     pub signature: String,
@@ -735,6 +771,20 @@ pub fn launcher_attestation_identity_v2(
     attestation: &SignedLauncherAttestationV2,
 ) -> Result<String, ProtocolError> {
     message_identity(ATTESTATION_IDENTITY_DOMAIN_V2, attestation)
+}
+
+pub fn launcher_attestation_identity_v3(
+    attestation: &SignedLauncherAttestationV3,
+) -> Result<String, ProtocolError> {
+    if attestation.payload.attestation_protocol_version
+        != SYSTEMD_PROTECTED_LAUNCHER_ATTESTATION_PROTOCOL_V3
+        || systemd_protected_launcher_instance_v2_identity(
+            &attestation.payload.systemd_protected_launcher,
+        )? != attestation.payload.systemd_protected_launcher.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(ATTESTATION_IDENTITY_DOMAIN_V3, attestation)
 }
 
 pub fn launcher_principal_mapping_identity(
@@ -1525,6 +1575,38 @@ mod tests {
             systemd_protected_launcher_instance_v2_identity(&complete)
                 .expect("stable complete launcher instance identity"),
             complete.identity
+        );
+        let attestation = SignedLauncherAttestationV3 {
+            payload: LauncherAttestationPayloadV3 {
+                message_kind: ATTESTATION_RESPONSE.into(),
+                attestation_protocol_version: SYSTEMD_PROTECTED_LAUNCHER_ATTESTATION_PROTOCOL_V3
+                    .into(),
+                binding_identity: format!("sha256:{}", "1".repeat(64)),
+                challenge_nonce_commitment: format!("sha256:{}", "2".repeat(64)),
+                invocation_id: String::from("systemd-invocation-1"),
+                work_unit_identity: format!("sha256:{}", "3".repeat(64)),
+                semantic_scope_identity: format!("sha256:{}", "4".repeat(64)),
+                runner_principal: complete.instance_v1.principal_mapping.identity.clone(),
+                channel_delivery: String::from("launcher_session_fd"),
+                authenticated_origin: String::from("systemd-protected-launcher"),
+                authority_mounts: vec![String::from("authority-binding-v2")],
+                systemd_protected_launcher: complete.clone(),
+                issuer: String::from("systemd-attestor"),
+                audience: String::from("ota-crossing-broker"),
+                issued_at: String::from("2026-08-08T00:00:00Z"),
+                expires_at: String::from("2026-08-08T00:02:00Z"),
+            },
+            key_id: String::from("systemd-attestor-2026-01"),
+            algorithm: String::from("ed25519"),
+            signature: String::from("signature"),
+        };
+        assert!(launcher_attestation_identity_v3(&attestation).is_ok());
+        let mut changed_protocol = attestation.clone();
+        changed_protocol.payload.attestation_protocol_version =
+            RUNTIME_BOUNDARY_ATTESTATION_PROTOCOL_V2.into();
+        assert_eq!(
+            launcher_attestation_identity_v3(&changed_protocol),
+            Err(ProtocolError::InvalidRecord)
         );
         let mut missing = complete.clone();
         missing.launcher_observations.pop();
