@@ -30,6 +30,11 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const PROTOCOL_VERSION_V1: &str = "ota-crossing-broker/v1";
+pub const RUNTIME_BOUNDARY_ATTESTATION_PROTOCOL_V2: &str = "ota-runtime-boundary-attestation/v2";
+pub const RUNTIME_BOUNDARY_SCHEMA_VERSION_V1: u32 = 1;
+pub const PROTECTED_LAUNCHER_PROFILE_ID_V1: &str = "ota.runtime-boundary.protected-launcher/v1";
+pub const PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1: &str =
+    "ota.runtime-boundary.protected-launcher-image/v1";
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
@@ -45,8 +50,12 @@ pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 pub const CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.challenge.v1\0";
 pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.v1\0";
 pub const BROKER_BINDING_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.binding.v1\0";
+pub const BROKER_BINDING_IDENTITY_DOMAIN_V2: &[u8] = b"ota.crossing-broker.binding.v2\0";
+pub const ATTESTATION_IDENTITY_DOMAIN_V2: &[u8] = b"ota.crossing-broker.attestation.v2\0";
+pub const RUNTIME_BOUNDARY_PROFILE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.runtime-boundary.profile.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
+pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
 pub const AUTHORIZATION_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/authorization-request/v1";
 pub const AUTHORIZATION_DECISION_DOMAIN_V1: &str = "ota-crossing-broker/authorization-decision/v1";
 pub const LEASE_ISSUANCE_DOMAIN_V1: &str = "ota-crossing-broker/lease-issuance/v1";
@@ -92,6 +101,132 @@ pub struct LauncherAttestationPayload {
 #[serde(deny_unknown_fields)]
 pub struct SignedLauncherAttestation {
     pub payload: LauncherAttestationPayload,
+    pub key_id: String,
+    pub algorithm: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBoundaryAttestorKind {
+    ProtectedLauncher,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBoundaryObservationState {
+    Verified,
+    Failed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBoundaryObservationName {
+    JobPrincipalNonRoot,
+    AuthorityBindingWriteDenied,
+    AttestorStateWriteDenied,
+    BrokerCredentialsAbsentFromJob,
+    BrokerCredentialsAbsentFromTask,
+    BrokerSessionNonInheritable,
+    BrokerSessionNotReacquirable,
+    HostControlSocketUnavailable,
+    PrivilegeEscalationUnavailable,
+    LauncherBinaryIdentityBound,
+    LauncherConfigIdentityBound,
+    RunnerImageIdentityBound,
+    HardeningProfileIdentityBound,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBoundaryEvidenceMethod {
+    LauncherPrincipalBinding,
+    TargetPrincipalAccessCheck,
+    LauncherEnvironmentExclusion,
+    ChildEnvironmentExclusion,
+    DescriptorCloexecVerification,
+    ProtectedSessionLifetime,
+    LauncherPrivilegePolicy,
+    ProtectedBinaryMeasurement,
+    ProtectedConfigMeasurement,
+    ProtectedImageMeasurement,
+    ProtectedProfileMeasurement,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBoundarySemanticIdentityPosture {
+    Required,
+    Forbidden,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeBoundaryObservationRequirement {
+    pub name: RuntimeBoundaryObservationName,
+    pub evidence_method: RuntimeBoundaryEvidenceMethod,
+    pub semantic_identity: RuntimeBoundarySemanticIdentityPosture,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeBoundaryProfileDefinition {
+    pub schema_version: u32,
+    pub profile_id: String,
+    pub attestor_kind: RuntimeBoundaryAttestorKind,
+    pub observations: Vec<RuntimeBoundaryObservationRequirement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeBoundaryObservation {
+    pub name: RuntimeBoundaryObservationName,
+    pub state: RuntimeBoundaryObservationState,
+    pub evidence_method: RuntimeBoundaryEvidenceMethod,
+    pub reason_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeBoundaryAttestation {
+    pub schema_version: u32,
+    pub profile_id: String,
+    pub profile_identity: String,
+    pub attestor_kind: RuntimeBoundaryAttestorKind,
+    pub attestor_instance_identity: String,
+    pub launcher_session_binding_identity: String,
+    pub observations: Vec<RuntimeBoundaryObservation>,
+}
+
+/// Additive v2 attestation payload. The v1 payload remains unchanged for archive compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherAttestationPayloadV2 {
+    pub message_kind: String,
+    pub attestation_protocol_version: String,
+    pub binding_identity: String,
+    pub challenge_nonce_commitment: String,
+    pub invocation_id: String,
+    pub work_unit_identity: String,
+    pub semantic_scope_identity: String,
+    pub runner_principal: String,
+    pub channel_delivery: String,
+    pub authenticated_origin: String,
+    pub authority_mounts: Vec<String>,
+    pub runtime_boundary: RuntimeBoundaryAttestation,
+    pub issuer: String,
+    pub audience: String,
+    pub issued_at: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedLauncherAttestationV2 {
+    pub payload: LauncherAttestationPayloadV2,
     pub key_id: String,
     pub algorithm: String,
     pub signature: String,
@@ -311,6 +446,123 @@ pub fn sha256_identity(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+pub fn protected_launcher_profile_v1() -> RuntimeBoundaryProfileDefinition {
+    RuntimeBoundaryProfileDefinition {
+        schema_version: RUNTIME_BOUNDARY_SCHEMA_VERSION_V1,
+        profile_id: PROTECTED_LAUNCHER_PROFILE_ID_V1.into(),
+        attestor_kind: RuntimeBoundaryAttestorKind::ProtectedLauncher,
+        observations: vec![
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::JobPrincipalNonRoot,
+                RuntimeBoundaryEvidenceMethod::LauncherPrincipalBinding,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::AuthorityBindingWriteDenied,
+                RuntimeBoundaryEvidenceMethod::TargetPrincipalAccessCheck,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::AttestorStateWriteDenied,
+                RuntimeBoundaryEvidenceMethod::TargetPrincipalAccessCheck,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::BrokerCredentialsAbsentFromJob,
+                RuntimeBoundaryEvidenceMethod::LauncherEnvironmentExclusion,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::BrokerCredentialsAbsentFromTask,
+                RuntimeBoundaryEvidenceMethod::ChildEnvironmentExclusion,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::BrokerSessionNonInheritable,
+                RuntimeBoundaryEvidenceMethod::DescriptorCloexecVerification,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::BrokerSessionNotReacquirable,
+                RuntimeBoundaryEvidenceMethod::ProtectedSessionLifetime,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::HostControlSocketUnavailable,
+                RuntimeBoundaryEvidenceMethod::TargetPrincipalAccessCheck,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::PrivilegeEscalationUnavailable,
+                RuntimeBoundaryEvidenceMethod::LauncherPrivilegePolicy,
+                RuntimeBoundarySemanticIdentityPosture::Forbidden,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::LauncherBinaryIdentityBound,
+                RuntimeBoundaryEvidenceMethod::ProtectedBinaryMeasurement,
+                RuntimeBoundarySemanticIdentityPosture::Required,
+            ),
+            runtime_boundary_requirement(
+                RuntimeBoundaryObservationName::LauncherConfigIdentityBound,
+                RuntimeBoundaryEvidenceMethod::ProtectedConfigMeasurement,
+                RuntimeBoundarySemanticIdentityPosture::Required,
+            ),
+        ],
+    }
+}
+
+pub fn protected_launcher_image_profile_v1() -> RuntimeBoundaryProfileDefinition {
+    let mut profile = protected_launcher_profile_v1();
+    profile.profile_id = PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1.into();
+    profile.observations.extend([
+        runtime_boundary_requirement(
+            RuntimeBoundaryObservationName::RunnerImageIdentityBound,
+            RuntimeBoundaryEvidenceMethod::ProtectedImageMeasurement,
+            RuntimeBoundarySemanticIdentityPosture::Required,
+        ),
+        runtime_boundary_requirement(
+            RuntimeBoundaryObservationName::HardeningProfileIdentityBound,
+            RuntimeBoundaryEvidenceMethod::ProtectedProfileMeasurement,
+            RuntimeBoundarySemanticIdentityPosture::Required,
+        ),
+    ]);
+    profile
+}
+
+pub fn runtime_boundary_profile_by_id(
+    profile_id: &str,
+) -> Option<RuntimeBoundaryProfileDefinition> {
+    match profile_id {
+        PROTECTED_LAUNCHER_PROFILE_ID_V1 => Some(protected_launcher_profile_v1()),
+        PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1 => Some(protected_launcher_image_profile_v1()),
+        _ => None,
+    }
+}
+
+pub fn runtime_boundary_profile_identity(
+    profile: &RuntimeBoundaryProfileDefinition,
+) -> Result<String, ProtocolError> {
+    message_identity(RUNTIME_BOUNDARY_PROFILE_IDENTITY_DOMAIN_V1, profile)
+}
+
+pub fn launcher_attestation_identity_v2(
+    attestation: &SignedLauncherAttestationV2,
+) -> Result<String, ProtocolError> {
+    message_identity(ATTESTATION_IDENTITY_DOMAIN_V2, attestation)
+}
+
+fn runtime_boundary_requirement(
+    name: RuntimeBoundaryObservationName,
+    evidence_method: RuntimeBoundaryEvidenceMethod,
+    semantic_identity: RuntimeBoundarySemanticIdentityPosture,
+) -> RuntimeBoundaryObservationRequirement {
+    RuntimeBoundaryObservationRequirement {
+        name,
+        evidence_method,
+        semantic_identity,
+    }
+}
+
 pub fn nonce_commitment(nonce: &[u8]) -> String {
     sha256_identity(&domain_separated(CHALLENGE_IDENTITY_DOMAIN_V1, nonce))
 }
@@ -398,6 +650,18 @@ mod tests {
             b"ota.crossing-broker.binding.v1\0"
         );
         assert_eq!(
+            BROKER_BINDING_IDENTITY_DOMAIN_V2,
+            b"ota.crossing-broker.binding.v2\0"
+        );
+        assert_eq!(
+            ATTESTATION_RESPONSE_DOMAIN_V2,
+            "ota-crossing-broker/attestation-response/v2"
+        );
+        assert_eq!(
+            ATTESTATION_IDENTITY_DOMAIN_V2,
+            b"ota.crossing-broker.attestation.v2\0"
+        );
+        assert_eq!(
             [
                 CHALLENGE_REQUEST_DOMAIN_V1,
                 ATTESTATION_RESPONSE_DOMAIN_V1,
@@ -436,6 +700,158 @@ mod tests {
             .expect("work unit"),
             "sha256:7a56b64f47af50db7d230e88681a8b86efa38ba1cc5bd6d9d905d3ce2d1fd009"
         );
+    }
+
+    #[test]
+    fn runtime_boundary_profiles_are_closed_ordered_and_content_addressed() {
+        let base = protected_launcher_profile_v1();
+        let image = protected_launcher_image_profile_v1();
+
+        assert_eq!(base.schema_version, 1);
+        assert_eq!(base.profile_id, PROTECTED_LAUNCHER_PROFILE_ID_V1);
+        assert_eq!(base.observations.len(), 11);
+        assert_eq!(image.profile_id, PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1);
+        assert_eq!(image.observations.len(), 13);
+        assert_eq!(
+            base.observations[0].semantic_identity,
+            RuntimeBoundarySemanticIdentityPosture::Forbidden
+        );
+        assert_eq!(
+            base.observations[9].semantic_identity,
+            RuntimeBoundarySemanticIdentityPosture::Required
+        );
+        assert_eq!(
+            base.observations[10].semantic_identity,
+            RuntimeBoundarySemanticIdentityPosture::Required
+        );
+        assert_eq!(
+            &image.observations[..base.observations.len()],
+            base.observations.as_slice()
+        );
+        assert_eq!(
+            image.observations[11],
+            RuntimeBoundaryObservationRequirement {
+                name: RuntimeBoundaryObservationName::RunnerImageIdentityBound,
+                evidence_method: RuntimeBoundaryEvidenceMethod::ProtectedImageMeasurement,
+                semantic_identity: RuntimeBoundarySemanticIdentityPosture::Required,
+            }
+        );
+        assert_eq!(
+            image.observations[12],
+            RuntimeBoundaryObservationRequirement {
+                name: RuntimeBoundaryObservationName::HardeningProfileIdentityBound,
+                evidence_method: RuntimeBoundaryEvidenceMethod::ProtectedProfileMeasurement,
+                semantic_identity: RuntimeBoundarySemanticIdentityPosture::Required,
+            }
+        );
+        assert_eq!(
+            runtime_boundary_profile_identity(&base).expect("base profile identity"),
+            "sha256:8a0c2b279b90840a038525f841f896016030a9f61a054fb759da4bb197faf4e8"
+        );
+        assert_eq!(
+            runtime_boundary_profile_identity(&image).expect("image profile identity"),
+            "sha256:8e59ecce1e92370ad682d9a73c4e710f86f302122f9bd1dc7c829f0b11aa5f7b"
+        );
+        assert_eq!(
+            runtime_boundary_profile_by_id(PROTECTED_LAUNCHER_PROFILE_ID_V1),
+            Some(base)
+        );
+        assert!(runtime_boundary_profile_by_id("unknown-profile").is_none());
+    }
+
+    #[test]
+    fn v2_attestation_has_a_distinct_wire_shape_and_identity_domain() {
+        let profile = protected_launcher_profile_v1();
+        let observations = profile
+            .observations
+            .iter()
+            .map(|requirement| RuntimeBoundaryObservation {
+                name: requirement.name,
+                state: RuntimeBoundaryObservationState::Verified,
+                evidence_method: requirement.evidence_method,
+                reason_code: "verified_by_protected_launcher".into(),
+                semantic_identity: (requirement.semantic_identity
+                    == RuntimeBoundarySemanticIdentityPosture::Required)
+                    .then(|| "sha256:bounded-measurement".into()),
+            })
+            .collect();
+        let attestation = SignedLauncherAttestationV2 {
+            payload: LauncherAttestationPayloadV2 {
+                message_kind: ATTESTATION_RESPONSE.into(),
+                attestation_protocol_version: RUNTIME_BOUNDARY_ATTESTATION_PROTOCOL_V2.into(),
+                binding_identity: "sha256:binding-v2".into(),
+                challenge_nonce_commitment: "sha256:nonce".into(),
+                invocation_id: "invocation".into(),
+                work_unit_identity: "sha256:work-unit".into(),
+                semantic_scope_identity: "sha256:scope".into(),
+                runner_principal: "ota-runner".into(),
+                channel_delivery: "launcher_session_fd".into(),
+                authenticated_origin: "protected_launcher".into(),
+                authority_mounts: vec!["authority_binding".into(), "attestor_state".into()],
+                runtime_boundary: RuntimeBoundaryAttestation {
+                    schema_version: RUNTIME_BOUNDARY_SCHEMA_VERSION_V1,
+                    profile_id: profile.profile_id.clone(),
+                    profile_identity: runtime_boundary_profile_identity(&profile)
+                        .expect("profile identity"),
+                    attestor_kind: RuntimeBoundaryAttestorKind::ProtectedLauncher,
+                    attestor_instance_identity: "sha256:attestor".into(),
+                    launcher_session_binding_identity: "sha256:launcher-session".into(),
+                    observations,
+                },
+                issuer: "runner-launcher".into(),
+                audience: "ota-crossing-broker".into(),
+                issued_at: "2026-08-08T00:00:00Z".into(),
+                expires_at: "2026-08-08T00:02:00Z".into(),
+            },
+            key_id: "attestor-2026-01".into(),
+            algorithm: "ed25519".into(),
+            signature: "signature".into(),
+        };
+
+        let value = serde_json::to_value(&attestation).expect("v2 attestation JSON");
+        assert_eq!(
+            value["payload"]["attestation_protocol_version"],
+            RUNTIME_BOUNDARY_ATTESTATION_PROTOCOL_V2
+        );
+        assert_eq!(
+            value["payload"]["runtime_boundary"]["profile_id"],
+            PROTECTED_LAUNCHER_PROFILE_ID_V1
+        );
+        assert_eq!(
+            value["payload"]["runtime_boundary"]["observations"]
+                .as_array()
+                .expect("observations")
+                .len(),
+            11
+        );
+        assert_eq!(
+            launcher_attestation_identity_v2(&attestation).expect("attestation identity"),
+            "sha256:472aa0b63f6e9a056d4a546206aabbf0c80ddc0ff9be906b19722a4e17d29085"
+        );
+
+        assert!(serde_json::from_value::<SignedLauncherAttestation>(value.clone()).is_err());
+        let v1 = serde_json::json!({
+            "payload": {
+                "message_kind": "attestation_response",
+                "binding_identity": "binding",
+                "challenge_nonce_commitment": "nonce",
+                "invocation_id": "invocation",
+                "work_unit_identity": "work",
+                "semantic_scope_identity": "scope",
+                "runner_principal": "runner",
+                "channel_delivery": "launcher_session_fd",
+                "authenticated_origin": "launcher",
+                "authority_mounts": ["authority_binding"],
+                "issuer": "issuer",
+                "audience": "audience",
+                "issued_at": "2026-08-08T00:00:00Z",
+                "expires_at": "2026-08-08T00:02:00Z"
+            },
+            "key_id": "key",
+            "algorithm": "ed25519",
+            "signature": "signature"
+        });
+        assert!(serde_json::from_value::<SignedLauncherAttestationV2>(v1).is_err());
     }
 
     #[test]
