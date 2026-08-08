@@ -28,3 +28,5 @@
 
 - Publish the v1 crossing-authority wire model, bounded framing, canonical identity helpers, and
   conformance tests.
+- Add fresh-attestation-bound consumption-status query and response messages for fail-closed
+  recovery after an uncertain lease-consume acknowledgement.
