@@ -40,6 +40,7 @@ This repository owns:
 - additive runtime-boundary attestation v2 types and canonical protected-launcher profiles;
 - immutable principal-mapping, Ota process-posture, and systemd launcher-profile foundations for
   the planned production protected-launcher adapter;
+- the bounded Linux systemd-launcher client/service request, output, and terminal frames;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
 - compatibility and adversarial conformance tests.
@@ -170,6 +171,19 @@ can execute:
 These definitions do not implement systemd, inspect a host, hold an attestor key, or create a
 provider claim. Core and authority-launcher must pin the same immutable protocol revision and
 independently verify their respective boundaries before the adapter can be enabled.
+
+### Systemd launcher service frames
+
+`ota-authority-launcher/systemd/v1` adds the local client/service envelope for the Linux-only
+adapter. A client sends one `launcher_invocation_request` containing only an authority label,
+bounded Ota arguments, and an absolute logical repository path. It is an untrusted proposal, not
+authority: the root-owned service derives the Unix peer, chooses the configured mapping, and mints
+the invocation identity. The service returns ordered binary-safe `launcher_output` frames followed
+by exactly one `launcher_terminal` frame.
+
+The envelope carries no broker credential, caller identity assertion, semantic scope, or grant.
+Core and the launcher establish those values through the protected session and signed broker
+protocol after the service has admitted the request.
 
 ## Status
 

@@ -38,10 +38,17 @@ pub const PROTECTED_LAUNCHER_PROFILE_ID_V1: &str = "ota.runtime-boundary.protect
 pub const PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1: &str =
     "ota.runtime-boundary.protected-launcher-image/v1";
 pub const SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1: &str = "systemd_protected_launcher/v1";
+pub const SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1: &str = "ota-authority-launcher/systemd/v1";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V1: &str = "ota.authority-launcher.systemd/v1";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1: &str = "ota.authority-job-principal.systemd/v1";
 pub const OTA_PROCESS_POSTURE: &str = "ota_process_posture";
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
+pub const MAX_LAUNCHER_ARGUMENTS_V1: usize = 128;
+pub const MAX_LAUNCHER_ARGUMENT_BYTES_V1: usize = 4096;
+pub const MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1: usize = 128;
+pub const MAX_LAUNCHER_REPOSITORY_PATH_BYTES_V1: usize = 4096;
+// JSON byte-array encoding can use up to four bytes per payload byte plus framing metadata.
+pub const MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1: usize = 15 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
 pub const ATTESTATION_RESPONSE: &str = "attestation_response";
@@ -52,6 +59,9 @@ pub const LEASE_CONSUME: &str = "lease_consume";
 pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
 pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
 pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
+pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
+pub const LAUNCHER_OUTPUT: &str = "launcher_output";
+pub const LAUNCHER_TERMINAL: &str = "launcher_terminal";
 
 pub const CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.challenge.v1\0";
 pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.v1\0";
@@ -95,6 +105,62 @@ pub struct BrokerChallenge {
     pub work_unit_identity: String,
     pub semantic_scope_identity: String,
     pub contract_identity: String,
+}
+
+/// An untrusted request sent to the fixed systemd launcher socket.
+///
+/// This record is deliberately not an authority grant, semantic scope, or caller identity. The
+/// service derives peer identity from the connected Unix socket, applies its protected mapping,
+/// and mints the authoritative invocation identity after validating this bounded proposal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherInvocationRequestV1 {
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub authority_id: String,
+    pub ota_arguments: Vec<String>,
+    pub repository_path: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherOutputStreamV1 {
+    Stdout,
+    Stderr,
+}
+
+/// A service-to-client output frame. Payload bytes are encoded by Serde as a JSON byte array so
+/// the framing contract remains binary-safe without making a text-output claim.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherOutputFrameV1 {
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub invocation_id: String,
+    pub sequence: u64,
+    pub stream: LauncherOutputStreamV1,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherTerminalOutcomeV1 {
+    Completed,
+    Refused,
+    Failed,
+    Cancelled,
+}
+
+/// The sole terminal frame for one launcher invocation. A client must not treat any output frame
+/// as an execution result before it receives this record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherTerminalFrameV1 {
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub invocation_id: String,
+    pub outcome: LauncherTerminalOutcomeV1,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -617,6 +683,73 @@ pub enum ProtocolError {
     Canonicalization,
     #[error("authority protocol record is semantically invalid")]
     InvalidRecord,
+}
+
+pub fn validate_launcher_invocation_request_v1(
+    request: &LauncherInvocationRequestV1,
+) -> Result<(), ProtocolError> {
+    if request.message_kind != LAUNCHER_INVOCATION_REQUEST
+        || request.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || !is_bounded_label(&request.authority_id, MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1)
+        || request.ota_arguments.is_empty()
+        || request.ota_arguments.len() > MAX_LAUNCHER_ARGUMENTS_V1
+        || !is_absolute_bounded_path(
+            &request.repository_path,
+            MAX_LAUNCHER_REPOSITORY_PATH_BYTES_V1,
+        )
+        || request.ota_arguments.iter().any(|argument| {
+            argument.is_empty()
+                || argument.len() > MAX_LAUNCHER_ARGUMENT_BYTES_V1
+                || argument.contains('\0')
+        })
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn validate_launcher_output_frame_v1(
+    frame: &LauncherOutputFrameV1,
+) -> Result<(), ProtocolError> {
+    if frame.message_kind != LAUNCHER_OUTPUT
+        || frame.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || !is_bounded_label(&frame.invocation_id, MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1)
+        || frame.payload.len() > MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn validate_launcher_terminal_frame_v1(
+    frame: &LauncherTerminalFrameV1,
+) -> Result<(), ProtocolError> {
+    if frame.message_kind != LAUNCHER_TERMINAL
+        || frame.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || !is_bounded_label(&frame.invocation_id, MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1)
+        || matches!(frame.outcome, LauncherTerminalOutcomeV1::Completed)
+            && frame.exit_code != Some(0)
+        || matches!(frame.outcome, LauncherTerminalOutcomeV1::Cancelled)
+            && frame.exit_code.is_some()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+fn is_bounded_label(value: &str, maximum_bytes: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum_bytes
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn is_absolute_bounded_path(value: &str, maximum_bytes: usize) -> bool {
+    value.len() <= maximum_bytes
+        && value.starts_with('/')
+        && !value.contains('\0')
+        && !value.split('/').any(|component| component == "..")
 }
 
 pub fn encode_frame(payload: &[u8]) -> Result<Vec<u8>, ProtocolError> {
@@ -1193,6 +1326,81 @@ mod tests {
         assert_eq!(
             decode_frame(&[0, 0, 0, 2, b'{']),
             Err(ProtocolError::IncompleteFrame)
+        );
+    }
+
+    #[test]
+    fn systemd_launcher_request_is_bounded_and_untrusted() {
+        let request = LauncherInvocationRequestV1 {
+            message_kind: LAUNCHER_INVOCATION_REQUEST.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            authority_id: "production-release".into(),
+            ota_arguments: vec!["up".into(), "--workflow".into(), "release".into()],
+            repository_path: "/srv/build/repository".into(),
+        };
+        assert_eq!(validate_launcher_invocation_request_v1(&request), Ok(()));
+
+        let mut relative_path = request.clone();
+        relative_path.repository_path = "repository".into();
+        assert_eq!(
+            validate_launcher_invocation_request_v1(&relative_path),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut parent_path = request.clone();
+        parent_path.repository_path = "/srv/build/../repository".into();
+        assert_eq!(
+            validate_launcher_invocation_request_v1(&parent_path),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut unknown = serde_json::to_value(&request).expect("request JSON");
+        unknown["caller_identity"] = serde_json::json!("untrusted");
+        assert!(serde_json::from_value::<LauncherInvocationRequestV1>(unknown).is_err());
+    }
+
+    #[test]
+    fn systemd_launcher_output_and_terminal_frames_are_strict() {
+        let output = LauncherOutputFrameV1 {
+            message_kind: LAUNCHER_OUTPUT.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            invocation_id: "request-123".into(),
+            sequence: 1,
+            stream: LauncherOutputStreamV1::Stdout,
+            payload: vec![0, 159, 255],
+        };
+        assert_eq!(validate_launcher_output_frame_v1(&output), Ok(()));
+
+        let largest_output = LauncherOutputFrameV1 {
+            payload: vec![255; MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1],
+            ..output.clone()
+        };
+        assert_eq!(validate_launcher_output_frame_v1(&largest_output), Ok(()));
+        let encoded = serde_json::to_vec(&largest_output).expect("output JSON");
+        assert!(encoded.len() <= MAX_FRAME_BYTES);
+        let too_large = LauncherOutputFrameV1 {
+            payload: vec![255; MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1 + 1],
+            ..output
+        };
+        assert_eq!(
+            validate_launcher_output_frame_v1(&too_large),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let complete = LauncherTerminalFrameV1 {
+            message_kind: LAUNCHER_TERMINAL.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            invocation_id: "request-123".into(),
+            outcome: LauncherTerminalOutcomeV1::Completed,
+            exit_code: Some(0),
+        };
+        assert_eq!(validate_launcher_terminal_frame_v1(&complete), Ok(()));
+
+        let mut contradictory = complete;
+        contradictory.exit_code = Some(1);
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&contradictory),
+            Err(ProtocolError::InvalidRecord)
         );
     }
 
