@@ -90,6 +90,8 @@ pub const LAUNCHER_WORKING_DIRECTORY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.working-directory.v1\0";
 pub const LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.child-process.v1\0";
+pub const LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.systemd-scope.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -155,6 +157,25 @@ pub struct LauncherChildProcessV1 {
     pub ota_binary_identity: String,
     pub principal_mapping_identity: String,
     pub working_directory_identity: String,
+}
+
+/// The exact non-delegated transient systemd scope containing one stopped Ota child.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherSystemdScopeV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub invocation_id: String,
+    pub request_identity: String,
+    pub child_identity: String,
+    pub child_pid: u32,
+    pub unit_name: String,
+    pub unit_object_path: String,
+    pub slice: String,
+    pub control_group: String,
+    pub delegate: bool,
+    pub kill_mode: String,
+    pub collect_mode: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -787,6 +808,34 @@ pub fn launcher_child_process_identity(
     let mut canonical = child.clone();
     canonical.identity.clear();
     message_identity(LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_systemd_scope_identity(
+    scope: &LauncherSystemdScopeV1,
+) -> Result<String, ProtocolError> {
+    if scope.schema_version != 1
+        || !is_bounded_label(
+            scope.invocation_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(scope.request_identity.as_str())
+        || !is_sha256_identity(scope.child_identity.as_str())
+        || scope.child_pid == 0
+        || !is_bounded_label(scope.unit_name.as_str(), 255)
+        || !scope.unit_name.starts_with("ota-authority-invocation-")
+        || !scope.unit_name.ends_with(".scope")
+        || !is_absolute_bounded_path(scope.unit_object_path.as_str(), 1024)
+        || scope.slice != "ota-authority-invocations.slice"
+        || !is_absolute_bounded_path(scope.control_group.as_str(), 1024)
+        || scope.delegate
+        || scope.kill_mode != "control-group"
+        || scope.collect_mode != "inactive-or-failed"
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = scope.clone();
+    canonical.identity.clear();
+    message_identity(LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1, &canonical)
 }
 
 pub fn validate_launcher_output_frame_v1(
@@ -1561,6 +1610,47 @@ mod tests {
                 .expect("changed request binding"),
             child.identity
         );
+        let unit_name = format!(
+            "ota-authority-invocation-{}.scope",
+            child.request_identity.trim_start_matches("sha256:")
+        );
+        let mut scope = LauncherSystemdScopeV1 {
+            schema_version: 1,
+            identity: String::new(),
+            invocation_id: child.invocation_id.clone(),
+            request_identity: child.request_identity.clone(),
+            child_identity: child.identity.clone(),
+            child_pid: child.pid,
+            unit_name: unit_name.clone(),
+            unit_object_path: format!("/org/freedesktop/systemd1/unit/{unit_name}"),
+            slice: String::from("ota-authority-invocations.slice"),
+            control_group: format!("/ota-authority-invocations.slice/{unit_name}"),
+            delegate: false,
+            kill_mode: String::from("control-group"),
+            collect_mode: String::from("inactive-or-failed"),
+        };
+        scope.identity = launcher_systemd_scope_identity(&scope).expect("scope identity");
+        assert_eq!(
+            scope.identity,
+            "sha256:7463099e41634f2d64d2ae741172cf8d0e8c3cd6dae757f9d7f9f683529047d0"
+        );
+        assert_eq!(
+            launcher_systemd_scope_identity(&scope).expect("stable scope identity"),
+            scope.identity
+        );
+        let mut changed_scope = scope.clone();
+        changed_scope.child_pid += 1;
+        assert_ne!(
+            launcher_systemd_scope_identity(&changed_scope).expect("changed scope identity"),
+            scope.identity
+        );
+        let mut invalid_scope = scope;
+        invalid_scope.delegate = true;
+        assert_eq!(
+            launcher_systemd_scope_identity(&invalid_scope),
+            Err(ProtocolError::InvalidRecord)
+        );
+
         let mut invalid_child = child;
         invalid_child.process_start_time_identity = String::from("pid-start");
         assert_eq!(

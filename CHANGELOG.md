@@ -44,3 +44,6 @@
 - Add canonical identities for the untrusted launcher invocation request, the exact retained
   working-directory device/inode, and the stopped fixed-binary child process. These records are
   execution-boundary foundations only; they do not authorize or resume a child.
+- Add the canonical transient systemd scope identity binding the exact stopped child, request,
+  unit object, fixed slice, kernel control group, and non-delegated cleanup controls. The record is
+  evidence only and cannot create, authorize, or resume a scope or child.

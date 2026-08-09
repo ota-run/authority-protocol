@@ -182,7 +182,8 @@ the invocation identity. The service returns ordered binary-safe `launcher_outpu
 by exactly one `launcher_terminal` frame.
 
 The protocol also publishes content-addressed identities for that exact request, the retained
-working-directory device/inode, and the stopped fixed-binary child. Those identities let the
+working-directory device/inode, the stopped fixed-binary child, and its exact non-delegated
+transient systemd scope. Those identities let the
 launcher durably reconcile preparation and cleanup without treating a PID, path string, or caller
 request as authority. They do not represent systemd-scope admission, execution, or broker
 authorization.
