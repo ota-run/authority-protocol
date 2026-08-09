@@ -46,6 +46,7 @@ pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const MAX_LAUNCHER_ARGUMENTS_V1: usize = 128;
 pub const MAX_LAUNCHER_ARGUMENT_BYTES_V1: usize = 4096;
 pub const MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1: usize = 128;
+pub const MAX_LAUNCHER_INVOCATION_ID_BYTES_V1: usize = 128;
 pub const MAX_LAUNCHER_REPOSITORY_PATH_BYTES_V1: usize = 4096;
 // JSON byte-array encoding can use up to four bytes per payload byte plus framing metadata.
 pub const MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1: usize = 15 * 1024;
@@ -83,6 +84,12 @@ pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2: &[u8] =
     b"ota.authority-launcher.instance.v2\0";
 pub const SYSTEMD_LAUNCHER_SERVICE_CONFIGURATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.systemd-service-configuration.v1\0";
+pub const LAUNCHER_INVOCATION_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.invocation-request.v1\0";
+pub const LAUNCHER_WORKING_DIRECTORY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.working-directory.v1\0";
+pub const LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.child-process.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -122,6 +129,32 @@ pub struct LauncherInvocationRequestV1 {
     pub authority_id: String,
     pub ota_arguments: Vec<String>,
     pub repository_path: String,
+}
+
+/// The exact repository directory retained by the protected launcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherWorkingDirectoryV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub logical_path: String,
+    pub device: u64,
+    pub inode: u64,
+}
+
+/// The stopped Ota child prepared by the protected launcher before systemd scope admission.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherChildProcessV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub invocation_id: String,
+    pub request_identity: String,
+    pub pid: u32,
+    pub process_start_time_identity: String,
+    pub ota_binary_identity: String,
+    pub principal_mapping_identity: String,
+    pub working_directory_identity: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -710,12 +743,58 @@ pub fn validate_launcher_invocation_request_v1(
     Ok(())
 }
 
+pub fn launcher_invocation_request_identity(
+    request: &LauncherInvocationRequestV1,
+) -> Result<String, ProtocolError> {
+    validate_launcher_invocation_request_v1(request)?;
+    message_identity(LAUNCHER_INVOCATION_REQUEST_IDENTITY_DOMAIN_V1, request)
+}
+
+pub fn launcher_working_directory_identity(
+    directory: &LauncherWorkingDirectoryV1,
+) -> Result<String, ProtocolError> {
+    if directory.schema_version != 1
+        || !is_absolute_bounded_path(
+            directory.logical_path.as_str(),
+            MAX_LAUNCHER_REPOSITORY_PATH_BYTES_V1,
+        )
+        || directory.inode == 0
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = directory.clone();
+    canonical.identity.clear();
+    message_identity(LAUNCHER_WORKING_DIRECTORY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_child_process_identity(
+    child: &LauncherChildProcessV1,
+) -> Result<String, ProtocolError> {
+    if child.schema_version != 1
+        || !is_bounded_label(
+            child.invocation_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(child.request_identity.as_str())
+        || child.pid == 0
+        || !is_sha256_identity(child.process_start_time_identity.as_str())
+        || !is_sha256_identity(child.ota_binary_identity.as_str())
+        || !is_sha256_identity(child.principal_mapping_identity.as_str())
+        || !is_sha256_identity(child.working_directory_identity.as_str())
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = child.clone();
+    canonical.identity.clear();
+    message_identity(LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1, &canonical)
+}
+
 pub fn validate_launcher_output_frame_v1(
     frame: &LauncherOutputFrameV1,
 ) -> Result<(), ProtocolError> {
     if frame.message_kind != LAUNCHER_OUTPUT
         || frame.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
-        || !is_bounded_label(&frame.invocation_id, MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1)
+        || !is_bounded_label(&frame.invocation_id, MAX_LAUNCHER_INVOCATION_ID_BYTES_V1)
         || frame.payload.len() > MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1
     {
         return Err(ProtocolError::InvalidRecord);
@@ -728,7 +807,7 @@ pub fn validate_launcher_terminal_frame_v1(
 ) -> Result<(), ProtocolError> {
     if frame.message_kind != LAUNCHER_TERMINAL
         || frame.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
-        || !is_bounded_label(&frame.invocation_id, MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1)
+        || !is_bounded_label(&frame.invocation_id, MAX_LAUNCHER_INVOCATION_ID_BYTES_V1)
         || matches!(frame.outcome, LauncherTerminalOutcomeV1::Completed)
             && frame.exit_code != Some(0)
         || matches!(frame.outcome, LauncherTerminalOutcomeV1::Cancelled)
@@ -1362,6 +1441,135 @@ mod tests {
     }
 
     #[test]
+    fn launcher_boundary_identities_bind_request_directory_and_child() {
+        let request = LauncherInvocationRequestV1 {
+            message_kind: LAUNCHER_INVOCATION_REQUEST.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            authority_id: "production-release".into(),
+            ota_arguments: vec!["run".into(), "publish".into()],
+            repository_path: "/srv/build/repository".into(),
+        };
+        let request_identity =
+            launcher_invocation_request_identity(&request).expect("request identity");
+        assert_eq!(
+            request_identity,
+            "sha256:4201f144c980632196b2edb0443833559f3903cdc498807d16e54569ae9d0ab4"
+        );
+        assert_eq!(
+            serde_json::to_value(&request).expect("request JSON"),
+            serde_json::json!({
+                "message_kind": "launcher_invocation_request",
+                "protocol_version": "ota-authority-launcher/systemd/v1",
+                "authority_id": "production-release",
+                "ota_arguments": ["run", "publish"],
+                "repository_path": "/srv/build/repository"
+            })
+        );
+        let mut changed_request = request.clone();
+        changed_request.ota_arguments[1] = "verify".into();
+        assert_ne!(
+            launcher_invocation_request_identity(&changed_request).expect("changed request"),
+            request_identity
+        );
+
+        let mut directory = LauncherWorkingDirectoryV1 {
+            schema_version: 1,
+            identity: String::new(),
+            logical_path: request.repository_path,
+            device: 8,
+            inode: 42,
+        };
+        directory.identity =
+            launcher_working_directory_identity(&directory).expect("working directory identity");
+        assert_eq!(
+            directory.identity,
+            "sha256:ca936d9590192ddb060764e59e84c3f96149f3fad79bfc4c3140b444bf3d86bc"
+        );
+        assert_eq!(
+            serde_json::to_value(&directory).expect("directory JSON"),
+            serde_json::json!({
+                "schema_version": 1,
+                "identity": directory.identity.clone(),
+                "logical_path": "/srv/build/repository",
+                "device": 8,
+                "inode": 42
+            })
+        );
+        assert_eq!(
+            launcher_working_directory_identity(&directory).expect("stable directory identity"),
+            directory.identity
+        );
+        let mut changed_directory = directory.clone();
+        changed_directory.inode += 1;
+        assert_ne!(
+            launcher_working_directory_identity(&changed_directory)
+                .expect("changed directory identity"),
+            directory.identity
+        );
+        let mut invalid_directory = directory.clone();
+        invalid_directory.logical_path = "/srv/build/../escape".into();
+        assert_eq!(
+            launcher_working_directory_identity(&invalid_directory),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let identity = |character: char| format!("sha256:{}", character.to_string().repeat(64));
+        let mut child = LauncherChildProcessV1 {
+            schema_version: 1,
+            identity: String::new(),
+            invocation_id: "invocation-123".into(),
+            request_identity,
+            pid: 4242,
+            process_start_time_identity: identity('a'),
+            ota_binary_identity: identity('b'),
+            principal_mapping_identity: identity('c'),
+            working_directory_identity: directory.identity,
+        };
+        child.identity = launcher_child_process_identity(&child).expect("child identity");
+        assert_eq!(
+            child.identity,
+            "sha256:32a19d003ac5758bc91bc5d818e8f1906f347e7665ac202148848a5cd86f2616"
+        );
+        assert_eq!(
+            serde_json::to_value(&child).expect("child JSON"),
+            serde_json::json!({
+                "schema_version": 1,
+                "identity": child.identity.clone(),
+                "invocation_id": "invocation-123",
+                "request_identity": "sha256:4201f144c980632196b2edb0443833559f3903cdc498807d16e54569ae9d0ab4",
+                "pid": 4242,
+                "process_start_time_identity": identity('a'),
+                "ota_binary_identity": identity('b'),
+                "principal_mapping_identity": identity('c'),
+                "working_directory_identity": "sha256:ca936d9590192ddb060764e59e84c3f96149f3fad79bfc4c3140b444bf3d86bc"
+            })
+        );
+        assert_eq!(
+            launcher_child_process_identity(&child).expect("stable child identity"),
+            child.identity
+        );
+        let mut changed_child = child.clone();
+        changed_child.pid += 1;
+        assert_ne!(
+            launcher_child_process_identity(&changed_child).expect("changed child identity"),
+            child.identity
+        );
+        let mut changed_request_binding = child.clone();
+        changed_request_binding.request_identity = identity('d');
+        assert_ne!(
+            launcher_child_process_identity(&changed_request_binding)
+                .expect("changed request binding"),
+            child.identity
+        );
+        let mut invalid_child = child;
+        invalid_child.process_start_time_identity = String::from("pid-start");
+        assert_eq!(
+            launcher_child_process_identity(&invalid_child),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
     fn systemd_launcher_output_and_terminal_frames_are_strict() {
         let output = LauncherOutputFrameV1 {
             message_kind: LAUNCHER_OUTPUT.into(),
@@ -1465,6 +1673,18 @@ mod tests {
         assert_eq!(
             SYSTEMD_LAUNCHER_SERVICE_CONFIGURATION_IDENTITY_DOMAIN_V1,
             b"ota.authority-launcher.systemd-service-configuration.v1\0"
+        );
+        assert_eq!(
+            LAUNCHER_INVOCATION_REQUEST_IDENTITY_DOMAIN_V1,
+            b"ota.authority-launcher.invocation-request.v1\0"
+        );
+        assert_eq!(
+            LAUNCHER_WORKING_DIRECTORY_IDENTITY_DOMAIN_V1,
+            b"ota.authority-launcher.working-directory.v1\0"
+        );
+        assert_eq!(
+            LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1,
+            b"ota.authority-launcher.child-process.v1\0"
         );
         assert_eq!(
             [

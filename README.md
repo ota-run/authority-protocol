@@ -181,6 +181,12 @@ authority: the root-owned service derives the Unix peer, chooses the configured 
 the invocation identity. The service returns ordered binary-safe `launcher_output` frames followed
 by exactly one `launcher_terminal` frame.
 
+The protocol also publishes content-addressed identities for that exact request, the retained
+working-directory device/inode, and the stopped fixed-binary child. Those identities let the
+launcher durably reconcile preparation and cleanup without treating a PID, path string, or caller
+request as authority. They do not represent systemd-scope admission, execution, or broker
+authorization.
+
 The envelope carries no broker credential, caller identity assertion, semantic scope, or grant.
 Core and the launcher establish those values through the protected session and signed broker
 protocol after the service has admitted the request.

@@ -41,3 +41,6 @@
   foundation to every ordered verified launcher and job-principal profile observation.
 - Add a distinct systemd protected-launcher attestation v3 envelope and identity domain. It carries
   only a complete instance v2 record and leaves v1/v2 attestation compatibility unchanged.
+- Add canonical identities for the untrusted launcher invocation request, the exact retained
+  working-directory device/inode, and the stopped fixed-binary child process. These records are
+  execution-boundary foundations only; they do not authorize or resume a child.
