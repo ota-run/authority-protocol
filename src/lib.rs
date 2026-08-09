@@ -81,6 +81,8 @@ pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.instance.v1\0";
 pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2: &[u8] =
     b"ota.authority-launcher.instance.v2\0";
+pub const SYSTEMD_LAUNCHER_SERVICE_CONFIGURATION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.systemd-service-configuration.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -1459,6 +1461,10 @@ mod tests {
         assert_eq!(
             ATTESTATION_IDENTITY_DOMAIN_V2,
             b"ota.crossing-broker.attestation.v2\0"
+        );
+        assert_eq!(
+            SYSTEMD_LAUNCHER_SERVICE_CONFIGURATION_IDENTITY_DOMAIN_V1,
+            b"ota.authority-launcher.systemd-service-configuration.v1\0"
         );
         assert_eq!(
             [
