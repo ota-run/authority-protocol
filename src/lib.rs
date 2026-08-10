@@ -207,6 +207,14 @@ pub enum LauncherTerminalOutcomeV1 {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherTerminalStageV1 {
+    RequestRefusedBeforeBoundary,
+    PostureAdmittedBoundaryRemoved,
+    BoundaryFailed,
+}
+
 /// The sole terminal frame for one launcher invocation. A client must not treat any output frame
 /// as an execution result before it receives this record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -217,6 +225,8 @@ pub struct LauncherTerminalFrameV1 {
     pub invocation_id: String,
     pub outcome: LauncherTerminalOutcomeV1,
     pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<LauncherTerminalStageV1>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -861,6 +871,15 @@ pub fn validate_launcher_terminal_frame_v1(
             && frame.exit_code != Some(0)
         || matches!(frame.outcome, LauncherTerminalOutcomeV1::Cancelled)
             && frame.exit_code.is_some()
+        || matches!(
+            frame.stage,
+            Some(
+                LauncherTerminalStageV1::RequestRefusedBeforeBoundary
+                    | LauncherTerminalStageV1::PostureAdmittedBoundaryRemoved
+            )
+        ) && (frame.outcome != LauncherTerminalOutcomeV1::Refused || frame.exit_code != Some(2))
+        || matches!(frame.stage, Some(LauncherTerminalStageV1::BoundaryFailed))
+            && (frame.outcome != LauncherTerminalOutcomeV1::Failed || frame.exit_code != Some(1))
     {
         return Err(ProtocolError::InvalidRecord);
     }
@@ -1693,6 +1712,7 @@ mod tests {
             invocation_id: "request-123".into(),
             outcome: LauncherTerminalOutcomeV1::Completed,
             exit_code: Some(0),
+            stage: None,
         };
         assert_eq!(validate_launcher_terminal_frame_v1(&complete), Ok(()));
 
@@ -1700,6 +1720,28 @@ mod tests {
         contradictory.exit_code = Some(1);
         assert_eq!(
             validate_launcher_terminal_frame_v1(&contradictory),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let posture_terminal = LauncherTerminalFrameV1 {
+            message_kind: LAUNCHER_TERMINAL.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            invocation_id: "request-123".into(),
+            outcome: LauncherTerminalOutcomeV1::Refused,
+            exit_code: Some(2),
+            stage: Some(LauncherTerminalStageV1::PostureAdmittedBoundaryRemoved),
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&posture_terminal),
+            Ok(())
+        );
+        let contradictory_stage = LauncherTerminalFrameV1 {
+            outcome: LauncherTerminalOutcomeV1::Failed,
+            exit_code: Some(1),
+            ..posture_terminal
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&contradictory_stage),
             Err(ProtocolError::InvalidRecord)
         );
     }
