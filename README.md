@@ -138,6 +138,20 @@ The distinct `LauncherAttestationPayloadV3` uses
 `SystemdProtectedLauncherInstanceEvidenceV2`; its identity helper refuses a missing,
 substituted, incomplete, or non-verified instance. V3 does not reinterpret v1 or v2 archives.
 
+V3 production signing uses two additional launcher-to-producer envelopes. The launcher derives
+`LauncherAttestationClaimsV3` from the frozen challenge and complete observed instance, then binds
+those JCS-normalized claims under
+`ota.authority-launcher.attestation-claims.v3\0` in one
+`LauncherAttestationSigningRequestV1`. The producer returns one
+`LauncherAttestationSigningResponseV1` that binds the exact request, claims identity, and signed V3
+attestation. Projecting the signed response back to launcher claims removes only producer-owned
+freshness and signature-wrapper fields. These protocol records neither authenticate the launcher
+peer nor own signing-key, clock, replay-state, or transport policy; the protected producer must
+enforce those runtime boundaries. The protected producer binding carries the public verification
+key and its identity, key interval, and both producer and verifier maximum-age bounds so launcher
+and producer independently derive the same narrowest validity window without exposing signing
+credentials.
+
 Every JSON payload is carried in one frame: a four-byte unsigned big-endian payload length followed
 by at most 64 KiB of UTF-8 JSON. Signed-message and identity domains are fixed protocol constants;
 this crate canonicalizes bytes and publishes profile identities but does not select trust roots.

@@ -26,6 +26,13 @@
 
 ## Unreleased
 
+- Add the canonical V3 protected-attestation producer protocol: domain-separated launcher claims,
+  identity-bound signing request and response envelopes, exact signed-payload projection, and
+  conformance vectors. The producer binding includes public verifier material and identity, key
+  validity, and producer/verifier freshness maxima while carrying no private credential. These
+  records define producer reconciliation only; they do not implement a signing service, broker
+  decision, lease, execution, receipt, or provider attestation.
+
 - Add the identity-bound systemd launcher startup continuation that unlocks Core CLI parsing after
   exact process-posture admission without representing crossing authority. Bind the exact
   invocation, child, working-directory, posture, and principal truth. Add the distinct

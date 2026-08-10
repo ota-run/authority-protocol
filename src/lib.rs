@@ -41,6 +41,9 @@ pub const SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1: &str = "systemd_protected_launc
 pub const SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1: &str = "ota-authority-launcher/systemd/v1";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V1: &str = "ota.authority-launcher.systemd/v1";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1: &str = "ota.authority-job-principal.systemd/v1";
+pub const SYSTEMD_ATTESTOR_SOCKET_PATH_V1: &str = "/run/ota/authority-attestor.sock";
+pub const SYSTEMD_ATTESTOR_SERVICE_UNIT_V1: &str = "ota-authority-attestor.service";
+pub const SYSTEMD_LAUNCHER_SERVICE_UNIT_V1: &str = "ota-authority-launcher.service";
 pub const OTA_PROCESS_POSTURE: &str = "ota_process_posture";
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const MAX_LAUNCHER_ARGUMENTS_V1: usize = 128;
@@ -62,6 +65,8 @@ pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
 pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
 pub const LAUNCHER_STARTUP_CONTINUATION: &str = "launcher_startup_continuation";
+pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST: &str = "launcher_attestation_signing_request";
+pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE: &str = "launcher_attestation_signing_response";
 pub const LAUNCHER_OUTPUT: &str = "launcher_output";
 pub const LAUNCHER_TERMINAL: &str = "launcher_terminal";
 
@@ -95,6 +100,14 @@ pub const LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.systemd-scope.v1\0";
 pub const LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.startup-continuation.v1\0";
+pub const LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3: &[u8] =
+    b"ota.authority-launcher.attestation-claims.v3\0";
+pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.attestation-signing-request.v1\0";
+pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.attestation-signing-response.v1\0";
+pub const LAUNCHER_ATTESTATION_PRODUCER_BINDING_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.attestation-producer-binding.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -436,6 +449,88 @@ pub struct SignedLauncherAttestationV3 {
     pub key_id: String,
     pub algorithm: String,
     pub signature: String,
+}
+
+/// Launcher-collected V3 claims before producer-owned freshness and signature fields exist.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherAttestationClaimsV3 {
+    pub message_kind: String,
+    pub attestation_protocol_version: String,
+    pub binding_identity: String,
+    pub challenge_nonce_commitment: String,
+    pub invocation_id: String,
+    pub work_unit_identity: String,
+    pub semantic_scope_identity: String,
+    pub runner_principal: String,
+    pub channel_delivery: String,
+    pub authenticated_origin: String,
+    pub authority_mounts: Vec<String>,
+    pub systemd_protected_launcher: SystemdProtectedLauncherInstanceEvidenceV2,
+    pub issuer: String,
+    pub audience: String,
+}
+
+/// Exact launcher request to the separately protected V3 attestation producer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherAttestationSigningRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub challenge: BrokerChallenge,
+    pub claims_identity: String,
+    pub claims: LauncherAttestationClaimsV3,
+    pub launcher_service_binding_identity: String,
+    pub launcher_configuration_identity: String,
+    pub launcher_executable_identity: String,
+    pub launcher_profile_identity: String,
+    pub producer_binding_identity: String,
+    pub producer_audience: String,
+    pub requested_maximum_validity_seconds: u64,
+}
+
+/// Producer response envelope binding the signed attestation back to one exact request and claims.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherAttestationSigningResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub claims_identity: String,
+    pub attestation: SignedLauncherAttestationV3,
+    pub response_identity: String,
+}
+
+/// Administrator-owned identity of the separately protected attestation producer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherAttestationProducerBindingV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub producer_id: String,
+    pub socket_path: String,
+    pub service_unit: String,
+    pub launcher_service_unit: String,
+    pub launcher_service_binding_identity: String,
+    pub launcher_configuration_identity: String,
+    pub launcher_profile_identity: String,
+    pub launcher_executable_identity: String,
+    pub producer_executable_identity: String,
+    pub verifier_key_set_identity: String,
+    pub signing_key_id: String,
+    pub signing_public_key: String,
+    pub signing_public_key_identity: String,
+    pub signing_key_not_before: String,
+    pub signing_key_not_after: String,
+    pub issuer: String,
+    pub audience: String,
+    pub maximum_attestation_age_seconds: u64,
+    pub verifier_maximum_age_seconds: u64,
+    pub maximum_request_bytes: usize,
+    pub read_write_timeout_seconds: u64,
+    pub issuance_state_directory: String,
+    pub signing_credential_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1114,6 +1209,183 @@ pub fn launcher_attestation_identity_v3(
         return Err(ProtocolError::InvalidRecord);
     }
     message_identity(ATTESTATION_IDENTITY_DOMAIN_V3, attestation)
+}
+
+pub fn launcher_attestation_claims_v3(
+    attestation: &SignedLauncherAttestationV3,
+) -> LauncherAttestationClaimsV3 {
+    LauncherAttestationClaimsV3 {
+        message_kind: attestation.payload.message_kind.clone(),
+        attestation_protocol_version: attestation.payload.attestation_protocol_version.clone(),
+        binding_identity: attestation.payload.binding_identity.clone(),
+        challenge_nonce_commitment: attestation.payload.challenge_nonce_commitment.clone(),
+        invocation_id: attestation.payload.invocation_id.clone(),
+        work_unit_identity: attestation.payload.work_unit_identity.clone(),
+        semantic_scope_identity: attestation.payload.semantic_scope_identity.clone(),
+        runner_principal: attestation.payload.runner_principal.clone(),
+        channel_delivery: attestation.payload.channel_delivery.clone(),
+        authenticated_origin: attestation.payload.authenticated_origin.clone(),
+        authority_mounts: attestation.payload.authority_mounts.clone(),
+        systemd_protected_launcher: attestation.payload.systemd_protected_launcher.clone(),
+        issuer: attestation.payload.issuer.clone(),
+        audience: attestation.payload.audience.clone(),
+    }
+}
+
+pub fn launcher_attestation_claims_v3_identity(
+    claims: &LauncherAttestationClaimsV3,
+) -> Result<String, ProtocolError> {
+    if claims.message_kind != ATTESTATION_RESPONSE
+        || claims.attestation_protocol_version != SYSTEMD_PROTECTED_LAUNCHER_ATTESTATION_PROTOCOL_V3
+        || !is_sha256_identity(&claims.binding_identity)
+        || !is_sha256_identity(&claims.challenge_nonce_commitment)
+        || !is_bounded_label(
+            claims.invocation_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(&claims.work_unit_identity)
+        || !is_sha256_identity(&claims.semantic_scope_identity)
+        || claims.runner_principal.is_empty()
+        || claims.channel_delivery.is_empty()
+        || claims.authenticated_origin.is_empty()
+        || claims.authority_mounts.is_empty()
+        || claims.issuer.is_empty()
+        || claims.audience.is_empty()
+        || systemd_protected_launcher_instance_v2_identity(&claims.systemd_protected_launcher)?
+            != claims.systemd_protected_launcher.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3, claims)
+}
+
+pub fn launcher_attestation_signing_request_v1_identity(
+    request: &LauncherAttestationSigningRequestV1,
+) -> Result<String, ProtocolError> {
+    let claims_identity = launcher_attestation_claims_v3_identity(&request.claims)?;
+    if request.schema_version != 1
+        || request.message_kind != LAUNCHER_ATTESTATION_SIGNING_REQUEST
+        || request.claims_identity != claims_identity
+        || request.challenge.message_kind != CHALLENGE_REQUEST
+        || request.challenge.protocol_version != PROTOCOL_VERSION_V1
+        || request.challenge.binding_identity != request.claims.binding_identity
+        || request.challenge.nonce_commitment != request.claims.challenge_nonce_commitment
+        || request.challenge.work_unit_identity != request.claims.work_unit_identity
+        || request.challenge.semantic_scope_identity != request.claims.semantic_scope_identity
+        || request.producer_audience != request.claims.audience
+        || request.requested_maximum_validity_seconds == 0
+        || [
+            &request.launcher_service_binding_identity,
+            &request.launcher_configuration_identity,
+            &request.launcher_executable_identity,
+            &request.launcher_profile_identity,
+            &request.producer_binding_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.request_identity.clear();
+    message_identity(
+        LAUNCHER_ATTESTATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_launcher_attestation_signing_request_v1(
+    request: &LauncherAttestationSigningRequestV1,
+) -> Result<(), ProtocolError> {
+    if request.request_identity != launcher_attestation_signing_request_v1_identity(request)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn launcher_attestation_signing_response_v1_identity(
+    response: &LauncherAttestationSigningResponseV1,
+) -> Result<String, ProtocolError> {
+    let projected_claims = launcher_attestation_claims_v3(&response.attestation);
+    if response.schema_version != 1
+        || response.message_kind != LAUNCHER_ATTESTATION_SIGNING_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+        || response.claims_identity != launcher_attestation_claims_v3_identity(&projected_claims)?
+        || launcher_attestation_identity_v3(&response.attestation).is_err()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = response.clone();
+    canonical.response_identity.clear();
+    message_identity(
+        LAUNCHER_ATTESTATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_launcher_attestation_signing_response_v1(
+    response: &LauncherAttestationSigningResponseV1,
+) -> Result<(), ProtocolError> {
+    if response.response_identity != launcher_attestation_signing_response_v1_identity(response)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn launcher_attestation_producer_binding_v1_identity(
+    binding: &LauncherAttestationProducerBindingV1,
+) -> Result<String, ProtocolError> {
+    if binding.schema_version != 1
+        || !is_bounded_label(&binding.producer_id, 128)
+        || binding.socket_path != SYSTEMD_ATTESTOR_SOCKET_PATH_V1
+        || binding.service_unit != SYSTEMD_ATTESTOR_SERVICE_UNIT_V1
+        || binding.launcher_service_unit != SYSTEMD_LAUNCHER_SERVICE_UNIT_V1
+        || !is_sha256_identity(&binding.launcher_service_binding_identity)
+        || !is_sha256_identity(&binding.launcher_configuration_identity)
+        || !is_sha256_identity(&binding.launcher_profile_identity)
+        || !is_sha256_identity(&binding.launcher_executable_identity)
+        || !is_sha256_identity(&binding.producer_executable_identity)
+        || !is_sha256_identity(&binding.verifier_key_set_identity)
+        || !is_bounded_label(&binding.signing_key_id, 128)
+        || binding.signing_public_key.len() != 43
+        || !binding
+            .signing_public_key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        || !is_sha256_identity(&binding.signing_public_key_identity)
+        || binding.signing_key_not_before.is_empty()
+        || binding.signing_key_not_after.is_empty()
+        || binding.issuer.is_empty()
+        || binding.audience.is_empty()
+        || binding.maximum_attestation_age_seconds == 0
+        || binding.maximum_attestation_age_seconds > 3600
+        || binding.verifier_maximum_age_seconds == 0
+        || binding.verifier_maximum_age_seconds > 3600
+        || binding.maximum_attestation_age_seconds > binding.verifier_maximum_age_seconds
+        || binding.maximum_request_bytes == 0
+        || binding.maximum_request_bytes > MAX_FRAME_BYTES
+        || binding.read_write_timeout_seconds == 0
+        || binding.read_write_timeout_seconds > 600
+        || !is_absolute_bounded_path(&binding.issuance_state_directory, 4096)
+        || !is_bounded_label(&binding.signing_credential_name, 128)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = binding.clone();
+    canonical.identity.clear();
+    message_identity(
+        LAUNCHER_ATTESTATION_PRODUCER_BINDING_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_launcher_attestation_producer_binding_v1(
+    binding: &LauncherAttestationProducerBindingV1,
+) -> Result<(), ProtocolError> {
+    if binding.identity != launcher_attestation_producer_binding_v1_identity(binding)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
 }
 
 pub fn launcher_principal_mapping_identity(
@@ -1922,6 +2194,18 @@ mod tests {
             b"ota.authority-launcher.child-process.v1\0"
         );
         assert_eq!(
+            LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3,
+            b"ota.authority-launcher.attestation-claims.v3\0"
+        );
+        assert_eq!(
+            LAUNCHER_ATTESTATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1,
+            b"ota.authority-launcher.attestation-signing-request.v1\0"
+        );
+        assert_eq!(
+            LAUNCHER_ATTESTATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1,
+            b"ota.authority-launcher.attestation-signing-response.v1\0"
+        );
+        assert_eq!(
             [
                 CHALLENGE_REQUEST_DOMAIN_V1,
                 ATTESTATION_RESPONSE_DOMAIN_V1,
@@ -2045,6 +2329,56 @@ mod tests {
         assert_eq!(
             principal_identity,
             "sha256:e69ef375070bbb4f5616ba46b6f29b9a987372909016d1a1dfa40a5d4daae93d"
+        );
+
+        let mut producer = LauncherAttestationProducerBindingV1 {
+            schema_version: 1,
+            identity: String::new(),
+            producer_id: String::from("systemd-attestor-v1"),
+            socket_path: String::from(SYSTEMD_ATTESTOR_SOCKET_PATH_V1),
+            service_unit: String::from(SYSTEMD_ATTESTOR_SERVICE_UNIT_V1),
+            launcher_service_unit: String::from(SYSTEMD_LAUNCHER_SERVICE_UNIT_V1),
+            launcher_service_binding_identity: format!("sha256:{}", "5".repeat(64)),
+            launcher_configuration_identity: format!("sha256:{}", "6".repeat(64)),
+            launcher_profile_identity: format!("sha256:{}", "7".repeat(64)),
+            launcher_executable_identity: format!("sha256:{}", "1".repeat(64)),
+            producer_executable_identity: format!("sha256:{}", "2".repeat(64)),
+            verifier_key_set_identity: format!("sha256:{}", "3".repeat(64)),
+            signing_key_id: String::from("systemd-attestor-2026-01"),
+            signing_public_key: String::from("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            signing_public_key_identity: format!("sha256:{}", "4".repeat(64)),
+            signing_key_not_before: String::from("2026-08-01T00:00:00Z"),
+            signing_key_not_after: String::from("2026-09-01T00:00:00Z"),
+            issuer: String::from("systemd-attestor"),
+            audience: String::from("ota-crossing-broker"),
+            maximum_attestation_age_seconds: 120,
+            verifier_maximum_age_seconds: 180,
+            maximum_request_bytes: MAX_FRAME_BYTES,
+            read_write_timeout_seconds: 5,
+            issuance_state_directory: String::from("/var/lib/ota/authority-attestor/issuance"),
+            signing_credential_name: String::from("ota-attestor-ed25519"),
+        };
+        producer.identity = launcher_attestation_producer_binding_v1_identity(&producer)
+            .expect("producer binding identity");
+        validate_launcher_attestation_producer_binding_v1(&producer)
+            .expect("valid producer binding");
+        let mut changed = producer.clone();
+        changed.maximum_attestation_age_seconds = 121;
+        assert_eq!(
+            validate_launcher_attestation_producer_binding_v1(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut invalid_public_key = producer.clone();
+        invalid_public_key.signing_public_key = String::from("not-a-public-key");
+        assert_eq!(
+            validate_launcher_attestation_producer_binding_v1(&invalid_public_key),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut invalid_verifier_window = producer.clone();
+        invalid_verifier_window.verifier_maximum_age_seconds = 119;
+        assert_eq!(
+            validate_launcher_attestation_producer_binding_v1(&invalid_verifier_window),
+            Err(ProtocolError::InvalidRecord)
         );
     }
 
@@ -2270,6 +2604,94 @@ mod tests {
             signature: String::from("signature"),
         };
         assert!(launcher_attestation_identity_v3(&attestation).is_ok());
+        let claims = launcher_attestation_claims_v3(&attestation);
+        let claims_identity =
+            launcher_attestation_claims_v3_identity(&claims).expect("claims identity");
+        assert_ne!(
+            claims_identity,
+            launcher_attestation_identity_v3(&attestation).expect("attestation identity")
+        );
+        let challenge = BrokerChallenge {
+            message_kind: CHALLENGE_REQUEST.into(),
+            protocol_version: PROTOCOL_VERSION_V1.into(),
+            binding_identity: claims.binding_identity.clone(),
+            nonce_commitment: claims.challenge_nonce_commitment.clone(),
+            work_unit_identity: claims.work_unit_identity.clone(),
+            semantic_scope_identity: claims.semantic_scope_identity.clone(),
+            contract_identity: format!("sha256:{}", "5".repeat(64)),
+        };
+        let mut signing_request = LauncherAttestationSigningRequestV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_ATTESTATION_SIGNING_REQUEST.into(),
+            request_identity: String::new(),
+            challenge,
+            claims_identity: claims_identity.clone(),
+            claims,
+            launcher_service_binding_identity: format!("sha256:{}", "6".repeat(64)),
+            launcher_configuration_identity: format!("sha256:{}", "7".repeat(64)),
+            launcher_executable_identity: format!("sha256:{}", "8".repeat(64)),
+            launcher_profile_identity: format!("sha256:{}", "9".repeat(64)),
+            producer_binding_identity: format!("sha256:{}", "a".repeat(64)),
+            producer_audience: String::from("ota-crossing-broker"),
+            requested_maximum_validity_seconds: 120,
+        };
+        signing_request.request_identity =
+            launcher_attestation_signing_request_v1_identity(&signing_request)
+                .expect("signing request identity");
+        validate_launcher_attestation_signing_request_v1(&signing_request)
+            .expect("valid signing request");
+
+        let mut signing_response = LauncherAttestationSigningResponseV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_ATTESTATION_SIGNING_RESPONSE.into(),
+            request_identity: signing_request.request_identity.clone(),
+            claims_identity,
+            attestation: attestation.clone(),
+            response_identity: String::new(),
+        };
+        signing_response.response_identity =
+            launcher_attestation_signing_response_v1_identity(&signing_response)
+                .expect("signing response identity");
+        assert_eq!(
+            signing_response.claims_identity,
+            "sha256:238a6f661f977a7693960273973c02394ffd311e0a8bd642ea7950945b43c3a3"
+        );
+        assert_eq!(
+            signing_request.request_identity,
+            "sha256:f3eeaf9be54cd575c212c4487a3cf8212f4c2ac6dcdc5dc017ba6bb92dbaf572"
+        );
+        assert_eq!(
+            signing_response.response_identity,
+            "sha256:d5bf250f1c60961f791554889ae64ae08394a36063f3944badfb0102dd42de7e"
+        );
+        validate_launcher_attestation_signing_response_v1(&signing_response)
+            .expect("valid signing response");
+
+        let mut changed_claims = signing_request.clone();
+        changed_claims
+            .claims
+            .authenticated_origin
+            .push_str("-substituted");
+        assert_eq!(
+            validate_launcher_attestation_signing_request_v1(&changed_claims),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed_request = signing_response.clone();
+        changed_request.request_identity = format!("sha256:{}", "b".repeat(64));
+        assert_eq!(
+            validate_launcher_attestation_signing_response_v1(&changed_request),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed_response_claims = signing_response.clone();
+        changed_response_claims
+            .attestation
+            .payload
+            .authenticated_origin
+            .push_str("-substituted");
+        assert_eq!(
+            validate_launcher_attestation_signing_response_v1(&changed_response_claims),
+            Err(ProtocolError::InvalidRecord)
+        );
         let mut changed_protocol = attestation.clone();
         changed_protocol.payload.attestation_protocol_version =
             RUNTIME_BOUNDARY_ATTESTATION_PROTOCOL_V2.into();
