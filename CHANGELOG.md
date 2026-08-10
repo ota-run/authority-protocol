@@ -26,6 +26,14 @@
 
 ## Unreleased
 
+- Add the identity-bound systemd launcher startup continuation that unlocks Core CLI parsing after
+  exact process-posture admission without representing crossing authority. Bind the exact
+  invocation, child, working-directory, posture, and principal truth. Add the distinct
+  `attestation_admitted_before_authorization_boundary_removed` terminal stage so consumers cannot
+  confuse posture-only cleanup with signed V3 admission and pre-authorization cleanup. Authority
+  decisions use `authority_refused_boundary_removed`; malformed or substituted bridge traffic uses
+  `pre_authorization_protocol_refused_boundary_removed` instead.
+
 - Publish the v1 crossing-authority wire model, bounded framing, canonical identity helpers, and
   conformance tests.
 - Add fresh-attestation-bound consumption-status query and response messages for fail-closed

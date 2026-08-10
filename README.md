@@ -94,7 +94,7 @@ sequenceDiagram
         Launcher->>Broker: Query exact prior consume request
         Broker-->>Launcher: lease_consumption_status (signed)
         Launcher-->>Core: Relay status and original signed consume response when consumed
-        Core->>Core: Finalize old work unit as incomplete; never resume its execution
+        Core->>Core: Finalize old work unit as incomplete and never resume its execution
     end
 ```
 
@@ -178,11 +178,17 @@ independently verify their respective boundaries before the adapter can be enabl
 adapter. A client sends one `launcher_invocation_request` containing only an authority label,
 bounded Ota arguments, and an absolute logical repository path. It is an untrusted proposal, not
 authority: the root-owned service derives the Unix peer, chooses the configured mapping, and mints
-the invocation identity. The service returns ordered binary-safe `launcher_output` frames followed
-by exactly one `launcher_terminal` frame. New V1 terminals may add a typed stage that distinguishes
-refusal before boundary creation, posture admission followed by exact boundary removal, and boundary
-failure. The field is additive so legacy V1 terminals remain readable; consumers must require the
-specific stage needed for any stronger proof claim rather than inferring it from an exit code.
+the invocation identity. After exact process-posture admission, an identity-bound
+`launcher_startup_continuation` binds the exact invocation, child, working directory, process
+posture, and principal mapping while unlocking CLI parsing only; it is not crossing authority. The
+service returns ordered binary-safe `launcher_output` frames followed by exactly one
+`launcher_terminal` frame. New V1 terminals may add a typed stage that distinguishes refusal before
+boundary creation, posture admission followed by exact boundary removal, authority refusal
+followed by exact boundary removal, pre-authorization protocol refusal followed by exact boundary
+removal, V3 attestation admission before authorization followed by exact boundary removal, and
+boundary failure. The field is additive so legacy V1 terminals remain readable; consumers must
+require the specific stage needed for any stronger proof claim rather than inferring it from an
+exit code.
 
 The protocol also publishes content-addressed identities for that exact request, the retained
 working-directory device/inode, the stopped fixed-binary child, and its exact non-delegated

@@ -61,6 +61,7 @@ pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
 pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
 pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
+pub const LAUNCHER_STARTUP_CONTINUATION: &str = "launcher_startup_continuation";
 pub const LAUNCHER_OUTPUT: &str = "launcher_output";
 pub const LAUNCHER_TERMINAL: &str = "launcher_terminal";
 
@@ -92,6 +93,8 @@ pub const LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.child-process.v1\0";
 pub const LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.systemd-scope.v1\0";
+pub const LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.startup-continuation.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -159,6 +162,23 @@ pub struct LauncherChildProcessV1 {
     pub working_directory_identity: String,
 }
 
+/// Launcher-local permission for the exact postured Ota child to continue into CLI admission.
+///
+/// This is not crossing authority. It unlocks command parsing so Core can freeze semantic scope
+/// and create its broker challenge on the same private launcher session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherStartupContinuationV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub invocation_id: String,
+    pub child_process_identity: String,
+    pub working_directory_identity: String,
+    pub process_posture_identity: String,
+    pub principal_mapping_identity: String,
+}
+
 /// The exact non-delegated transient systemd scope containing one stopped Ota child.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -212,6 +232,9 @@ pub enum LauncherTerminalOutcomeV1 {
 pub enum LauncherTerminalStageV1 {
     RequestRefusedBeforeBoundary,
     PostureAdmittedBoundaryRemoved,
+    AuthorityRefusedBoundaryRemoved,
+    PreAuthorizationProtocolRefusedBoundaryRemoved,
+    AttestationAdmittedBeforeAuthorizationBoundaryRemoved,
     BoundaryFailed,
 }
 
@@ -820,6 +843,27 @@ pub fn launcher_child_process_identity(
     message_identity(LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1, &canonical)
 }
 
+pub fn launcher_startup_continuation_identity(
+    continuation: &LauncherStartupContinuationV1,
+) -> Result<String, ProtocolError> {
+    if continuation.schema_version != 1
+        || continuation.message_kind != LAUNCHER_STARTUP_CONTINUATION
+        || !is_bounded_label(
+            continuation.invocation_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(&continuation.child_process_identity)
+        || !is_sha256_identity(&continuation.working_directory_identity)
+        || !is_sha256_identity(&continuation.process_posture_identity)
+        || !is_sha256_identity(&continuation.principal_mapping_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = continuation.clone();
+    canonical.identity.clear();
+    message_identity(LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1, &canonical)
+}
+
 pub fn launcher_systemd_scope_identity(
     scope: &LauncherSystemdScopeV1,
 ) -> Result<String, ProtocolError> {
@@ -876,6 +920,9 @@ pub fn validate_launcher_terminal_frame_v1(
             Some(
                 LauncherTerminalStageV1::RequestRefusedBeforeBoundary
                     | LauncherTerminalStageV1::PostureAdmittedBoundaryRemoved
+                    | LauncherTerminalStageV1::AuthorityRefusedBoundaryRemoved
+                    | LauncherTerminalStageV1::PreAuthorizationProtocolRefusedBoundaryRemoved
+                    | LauncherTerminalStageV1::AttestationAdmittedBeforeAuthorizationBoundaryRemoved
             )
         ) && (frame.outcome != LauncherTerminalOutcomeV1::Refused || frame.exit_code != Some(2))
         || matches!(frame.stage, Some(LauncherTerminalStageV1::BoundaryFailed))
@@ -1629,6 +1676,36 @@ mod tests {
                 .expect("changed request binding"),
             child.identity
         );
+        let mut continuation = LauncherStartupContinuationV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: LAUNCHER_STARTUP_CONTINUATION.into(),
+            invocation_id: child.invocation_id.clone(),
+            child_process_identity: child.identity.clone(),
+            working_directory_identity: child.working_directory_identity.clone(),
+            process_posture_identity: identity('e'),
+            principal_mapping_identity: child.principal_mapping_identity.clone(),
+        };
+        continuation.identity =
+            launcher_startup_continuation_identity(&continuation).expect("continuation identity");
+        assert_eq!(
+            launcher_startup_continuation_identity(&continuation)
+                .expect("stable continuation identity"),
+            continuation.identity
+        );
+        let mut changed_posture = continuation.clone();
+        changed_posture.process_posture_identity = identity('f');
+        assert_ne!(
+            launcher_startup_continuation_identity(&changed_posture)
+                .expect("changed continuation identity"),
+            continuation.identity
+        );
+        let mut unknown_kind = continuation;
+        unknown_kind.message_kind = String::from("continue");
+        assert_eq!(
+            launcher_startup_continuation_identity(&unknown_kind),
+            Err(ProtocolError::InvalidRecord)
+        );
         let unit_name = format!(
             "ota-authority-invocation-{}.scope",
             child.request_identity.trim_start_matches("sha256:")
@@ -1733,6 +1810,32 @@ mod tests {
         };
         assert_eq!(
             validate_launcher_terminal_frame_v1(&posture_terminal),
+            Ok(())
+        );
+        let attestation_terminal = LauncherTerminalFrameV1 {
+            stage: Some(
+                LauncherTerminalStageV1::AttestationAdmittedBeforeAuthorizationBoundaryRemoved,
+            ),
+            ..posture_terminal.clone()
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&attestation_terminal),
+            Ok(())
+        );
+        let authority_refusal_terminal = LauncherTerminalFrameV1 {
+            stage: Some(LauncherTerminalStageV1::AuthorityRefusedBoundaryRemoved),
+            ..posture_terminal.clone()
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&authority_refusal_terminal),
+            Ok(())
+        );
+        let protocol_refusal_terminal = LauncherTerminalFrameV1 {
+            stage: Some(LauncherTerminalStageV1::PreAuthorizationProtocolRefusedBoundaryRemoved),
+            ..posture_terminal.clone()
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&protocol_refusal_terminal),
             Ok(())
         );
         let contradictory_stage = LauncherTerminalFrameV1 {
