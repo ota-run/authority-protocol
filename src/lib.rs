@@ -692,6 +692,7 @@ pub struct SystemdLauncherObservation {
     pub source: SystemdLauncherEvidenceSource,
     pub state: RuntimeBoundaryObservationState,
     pub reason_code: String,
+    pub evidence_identity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -701,6 +702,7 @@ pub struct SystemdJobPrincipalObservation {
     pub evidence_methods: Vec<SystemdJobPrincipalEvidenceMethod>,
     pub state: RuntimeBoundaryObservationState,
     pub reason_code: String,
+    pub evidence_identity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1752,6 +1754,7 @@ fn validate_systemd_protected_launcher_instance_v2(
                 observed.source != *required
                     || observed.state != RuntimeBoundaryObservationState::Verified
                     || !is_reason_code(&observed.reason_code)
+                    || !is_sha256_identity(&observed.evidence_identity)
             })
     {
         return Err(ProtocolError::InvalidRecord);
@@ -1767,6 +1770,7 @@ fn validate_systemd_protected_launcher_instance_v2(
                     || observed.evidence_methods != required.evidence_methods
                     || observed.state != RuntimeBoundaryObservationState::Verified
                     || !is_reason_code(&observed.reason_code)
+                    || !is_sha256_identity(&observed.evidence_identity)
             })
     {
         return Err(ProtocolError::InvalidRecord);
@@ -2630,6 +2634,9 @@ mod tests {
                     source,
                     state: RuntimeBoundaryObservationState::Verified,
                     reason_code: String::from("verified_by_systemd_protected_launcher"),
+                    evidence_identity:
+                        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                            .into(),
                 })
                 .collect(),
             job_principal_observations: systemd_job_principal_profile_v1()
@@ -2640,6 +2647,9 @@ mod tests {
                     evidence_methods: required.evidence_methods,
                     state: RuntimeBoundaryObservationState::Verified,
                     reason_code: String::from("verified_by_systemd_protected_launcher"),
+                    evidence_identity:
+                        "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                            .into(),
                 })
                 .collect(),
         };
@@ -2738,15 +2748,15 @@ mod tests {
                 .expect("signing response identity");
         assert_eq!(
             signing_response.claims_identity,
-            "sha256:238a6f661f977a7693960273973c02394ffd311e0a8bd642ea7950945b43c3a3"
+            "sha256:28d830241f4914c75093f29d425c7bb04638078a7d3be26827e0440dda94d00d"
         );
         assert_eq!(
             signing_request.request_identity,
-            "sha256:f3eeaf9be54cd575c212c4487a3cf8212f4c2ac6dcdc5dc017ba6bb92dbaf572"
+            "sha256:3a19e57638848e196f2a0b20e5c161b3da3c61d5f7c01abedbb4fc4cd9f132fd"
         );
         assert_eq!(
             signing_response.response_identity,
-            "sha256:d5bf250f1c60961f791554889ae64ae08394a36063f3944badfb0102dd42de7e"
+            "sha256:2a484ef59e4b4c98b53b52900282f0fcb25551e0daab142cef056967fbc0ac64"
         );
         validate_launcher_attestation_signing_response_v1(&signing_response)
             .expect("valid signing response");
