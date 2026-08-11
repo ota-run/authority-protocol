@@ -40,6 +40,7 @@ pub const PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1: &str =
 pub const SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1: &str = "systemd_protected_launcher/v1";
 pub const SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1: &str = "ota-authority-launcher/systemd/v1";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V1: &str = "ota.authority-launcher.systemd/v1";
+pub const SYSTEMD_LAUNCHER_PROFILE_ID_V2: &str = "ota.authority-launcher.systemd/v2";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1: &str = "ota.authority-job-principal.systemd/v1";
 pub const SYSTEMD_ATTESTOR_SOCKET_PATH_V1: &str = "/run/ota/authority-attestor.sock";
 pub const SYSTEMD_ATTESTOR_SERVICE_UNIT_V1: &str = "ota-authority-attestor.service";
@@ -1479,6 +1480,36 @@ pub fn systemd_launcher_profile_v1() -> SystemdLauncherProfileDefinitionV1 {
     }
 }
 
+/// Launcher profile with attestation signing isolated in the protected producer service.
+///
+/// The definition wire schema remains V1; `profile_id` and content identity distinguish this
+/// additive profile from the legacy launcher-owned credential posture.
+pub fn systemd_launcher_profile_v2() -> SystemdLauncherProfileDefinitionV1 {
+    let mut profile = systemd_launcher_profile_v1();
+    profile.profile_id = SYSTEMD_LAUNCHER_PROFILE_ID_V2.into();
+    profile.service_settings.retain(|setting| {
+        !matches!(
+            setting.name.as_str(),
+            "ReadOnlyPaths" | "LoadCredentialEncrypted"
+        )
+    });
+    profile.service_settings.push(systemd_setting(
+        "ReadOnlyPaths",
+        "/etc/ota <installation_manifest> <unit_and_dropin_files> <launcher_and_ota_executables> <producer_public_verifier_set> <producer_socket_metadata> <broker_proxy_socket_metadata>",
+    ));
+    profile
+}
+
+pub fn systemd_launcher_profile_by_id(
+    profile_id: &str,
+) -> Option<SystemdLauncherProfileDefinitionV1> {
+    match profile_id {
+        SYSTEMD_LAUNCHER_PROFILE_ID_V1 => Some(systemd_launcher_profile_v1()),
+        SYSTEMD_LAUNCHER_PROFILE_ID_V2 => Some(systemd_launcher_profile_v2()),
+        _ => None,
+    }
+}
+
 pub fn systemd_job_principal_profile_v1() -> SystemdJobPrincipalProfileDefinitionV1 {
     use SystemdJobPrincipalEvidenceMethod as Evidence;
     use SystemdJobPrincipalRequirement as Requirement;
@@ -1663,8 +1694,14 @@ fn validate_systemd_protected_launcher_instance_v1(
 ) -> Result<(), ProtocolError> {
     let mapping_identity = launcher_principal_mapping_identity(&instance.principal_mapping)?;
     let posture_identity = ota_process_posture_identity(&instance.process_posture)?;
-    let launcher_profile_identity =
-        systemd_launcher_profile_identity(&systemd_launcher_profile_v1())?;
+    let launcher_profile = [systemd_launcher_profile_v1(), systemd_launcher_profile_v2()]
+        .into_iter()
+        .find(|profile| {
+            systemd_launcher_profile_identity(profile).as_deref()
+                == Ok(instance.systemd_launcher_profile_identity.as_str())
+        })
+        .ok_or(ProtocolError::InvalidRecord)?;
+    let launcher_profile_identity = systemd_launcher_profile_identity(&launcher_profile)?;
     let job_profile_identity =
         systemd_job_principal_profile_identity(&systemd_job_principal_profile_v1())?;
     if instance.schema_version != 1
@@ -1696,7 +1733,16 @@ fn validate_systemd_protected_launcher_instance_v2(
     {
         return Err(ProtocolError::InvalidRecord);
     }
-    let launcher_profile = systemd_launcher_profile_v1();
+    let launcher_profile = [systemd_launcher_profile_v1(), systemd_launcher_profile_v2()]
+        .into_iter()
+        .find(|profile| {
+            systemd_launcher_profile_identity(profile).as_deref()
+                == Ok(instance
+                    .instance_v1
+                    .systemd_launcher_profile_identity
+                    .as_str())
+        })
+        .ok_or(ProtocolError::InvalidRecord)?;
     if instance.launcher_observations.len() != launcher_profile.evidence_sources.len()
         || instance
             .launcher_observations
@@ -2306,6 +2352,7 @@ mod tests {
     #[test]
     fn systemd_launcher_profiles_are_closed_ordered_and_content_addressed() {
         let launcher = systemd_launcher_profile_v1();
+        let separated_producer = systemd_launcher_profile_v2();
         let principal = systemd_job_principal_profile_v1();
 
         assert_eq!(launcher.schema_version, 1);
@@ -2314,6 +2361,25 @@ mod tests {
         assert_eq!(launcher.socket_settings.len(), 7);
         assert_eq!(launcher.invocation_scope_settings.len(), 5);
         assert_eq!(launcher.evidence_sources.len(), 8);
+        assert_eq!(separated_producer.schema_version, 1);
+        assert_eq!(
+            separated_producer.profile_id,
+            SYSTEMD_LAUNCHER_PROFILE_ID_V2
+        );
+        assert_eq!(separated_producer.service_settings.len(), 28);
+        assert!(separated_producer.service_settings.iter().all(|setting| {
+            setting.name != "LoadCredentialEncrypted"
+                && !setting.value.contains("encrypted_attestor_credential")
+        }));
+        assert!(separated_producer.service_settings.iter().any(|setting| {
+            setting.name == "ReadOnlyPaths"
+                && setting.value.contains("<producer_public_verifier_set>")
+                && setting.value.contains("<producer_socket_metadata>")
+        }));
+        assert_eq!(
+            systemd_launcher_profile_by_id(SYSTEMD_LAUNCHER_PROFILE_ID_V2),
+            Some(separated_producer.clone())
+        );
         assert_eq!(principal.schema_version, 1);
         assert_eq!(principal.profile_id, SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1);
         assert_eq!(principal.requirements.len(), 18);
@@ -2325,6 +2391,11 @@ mod tests {
         assert_eq!(
             launcher_identity,
             "sha256:32c49f19799e065d341c900a4ce0d7756669c0c0d4e990ffe81bbcda06291930"
+        );
+        assert_eq!(
+            systemd_launcher_profile_identity(&separated_producer)
+                .expect("separated producer profile identity"),
+            "sha256:c816a49e01120bf1f793aedcfec094ca0f23a8ee80f1c7e5bed4c2d9c797cb42"
         );
         assert_eq!(
             principal_identity,
@@ -2579,6 +2650,19 @@ mod tests {
                 .expect("stable complete launcher instance identity"),
             complete.identity
         );
+        let mut separated_producer_complete = complete.clone();
+        separated_producer_complete
+            .instance_v1
+            .systemd_launcher_profile_identity =
+            systemd_launcher_profile_identity(&systemd_launcher_profile_v2())
+                .expect("separated producer profile identity");
+        separated_producer_complete.instance_v1.identity =
+            systemd_protected_launcher_instance_identity(&separated_producer_complete.instance_v1)
+                .expect("separated producer instance identity");
+        separated_producer_complete.identity =
+            systemd_protected_launcher_instance_v2_identity(&separated_producer_complete)
+                .expect("separated producer complete identity");
+        assert_ne!(separated_producer_complete.identity, complete.identity);
         let attestation = SignedLauncherAttestationV3 {
             payload: LauncherAttestationPayloadV3 {
                 message_kind: ATTESTATION_RESPONSE.into(),

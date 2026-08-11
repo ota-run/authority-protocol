@@ -26,6 +26,10 @@
 
 ## Unreleased
 
+- Add `ota.authority-launcher.systemd/v2` for the separated protected-attestation producer
+  boundary. It preserves V1 verification while removing launcher-owned signing credentials and
+  binding the producer socket metadata and public verifier set instead.
+
 - Add the canonical V3 protected-attestation producer protocol: domain-separated launcher claims,
   identity-bound signing request and response envelopes, exact signed-payload projection, and
   conformance vectors. The producer binding includes public verifier material and identity, key

@@ -176,8 +176,12 @@ can execute:
   reordered, failed, substituted, or unrecognized observations before an attestation can claim
   the closed profile.
 - `ota.authority-launcher.systemd/v1` fixes the ordered service/socket hardening semantics and
-  evidence sources. Its profile identity is
+  evidence sources for the legacy launcher-owned attestor credential posture. Its profile identity is
   `sha256:32c49f19799e065d341c900a4ce0d7756669c0c0d4e990ffe81bbcda06291930`.
+- `ota.authority-launcher.systemd/v2` preserves those evidence sources while moving signing
+  credentials exclusively into the separately protected producer service. The launcher binds only
+  producer socket metadata and the public verifier set. Its profile identity is
+  `sha256:c816a49e01120bf1f793aedcfec094ca0f23a8ee80f1c7e5bed4c2d9c797cb42`.
 - `ota.authority-job-principal.systemd/v1` fixes the ordered job-peer, execution-principal,
   privilege, process-containment, and process-inspection requirements. Its profile identity is
   `sha256:e69ef375070bbb4f5616ba46b6f29b9a987372909016d1a1dfa40a5d4daae93d`.
