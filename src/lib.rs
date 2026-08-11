@@ -89,6 +89,8 @@ pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.instance.v1\0";
 pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2: &[u8] =
     b"ota.authority-launcher.instance.v2\0";
+pub const SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V3: &[u8] =
+    b"ota.authority-launcher.instance.v3\0";
 pub const SYSTEMD_LAUNCHER_SERVICE_CONFIGURATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.systemd-service-configuration.v1\0";
 pub const LAUNCHER_INVOCATION_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
@@ -692,7 +694,8 @@ pub struct SystemdLauncherObservation {
     pub source: SystemdLauncherEvidenceSource,
     pub state: RuntimeBoundaryObservationState,
     pub reason_code: String,
-    pub evidence_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -702,7 +705,8 @@ pub struct SystemdJobPrincipalObservation {
     pub evidence_methods: Vec<SystemdJobPrincipalEvidenceMethod>,
     pub state: RuntimeBoundaryObservationState,
     pub reason_code: String,
-    pub evidence_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1627,7 +1631,12 @@ pub fn systemd_protected_launcher_instance_v2_identity(
     validate_systemd_protected_launcher_instance_v2(instance)?;
     let mut canonical = instance.clone();
     canonical.identity.clear();
-    message_identity(SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2, &canonical)
+    let domain = match instance.schema_version {
+        2 => SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V2,
+        3 => SYSTEMD_LAUNCHER_INSTANCE_IDENTITY_DOMAIN_V3,
+        _ => return Err(ProtocolError::InvalidRecord),
+    };
+    message_identity(domain, &canonical)
 }
 
 fn runtime_boundary_requirement(
@@ -1731,7 +1740,7 @@ fn validate_systemd_protected_launcher_instance_v2(
     validate_systemd_protected_launcher_instance_v1(&instance.instance_v1)?;
     if instance.instance_v1.identity
         != systemd_protected_launcher_instance_identity(&instance.instance_v1)?
-        || instance.schema_version != 2
+        || !matches!(instance.schema_version, 2 | 3)
     {
         return Err(ProtocolError::InvalidRecord);
     }
@@ -1754,7 +1763,12 @@ fn validate_systemd_protected_launcher_instance_v2(
                 observed.source != *required
                     || observed.state != RuntimeBoundaryObservationState::Verified
                     || !is_reason_code(&observed.reason_code)
-                    || !is_sha256_identity(&observed.evidence_identity)
+                    || match (&observed.evidence_identity, instance.schema_version) {
+                        (None, 2) => false,
+                        (Some(identity), _) => !is_sha256_identity(identity),
+                        (None, 3) => true,
+                        _ => true,
+                    }
             })
     {
         return Err(ProtocolError::InvalidRecord);
@@ -1770,7 +1784,12 @@ fn validate_systemd_protected_launcher_instance_v2(
                     || observed.evidence_methods != required.evidence_methods
                     || observed.state != RuntimeBoundaryObservationState::Verified
                     || !is_reason_code(&observed.reason_code)
-                    || !is_sha256_identity(&observed.evidence_identity)
+                    || match (&observed.evidence_identity, instance.schema_version) {
+                        (None, 2) => false,
+                        (Some(identity), _) => !is_sha256_identity(identity),
+                        (None, 3) => true,
+                        _ => true,
+                    }
             })
     {
         return Err(ProtocolError::InvalidRecord);
@@ -2624,7 +2643,7 @@ mod tests {
             instance.identity
         );
         let mut complete = SystemdProtectedLauncherInstanceEvidenceV2 {
-            schema_version: 2,
+            schema_version: 3,
             identity: String::new(),
             instance_v1: instance.clone(),
             launcher_observations: systemd_launcher_profile_v1()
@@ -2634,9 +2653,10 @@ mod tests {
                     source,
                     state: RuntimeBoundaryObservationState::Verified,
                     reason_code: String::from("verified_by_systemd_protected_launcher"),
-                    evidence_identity:
+                    evidence_identity: Some(
                         "sha256:1111111111111111111111111111111111111111111111111111111111111111"
                             .into(),
+                    ),
                 })
                 .collect(),
             job_principal_observations: systemd_job_principal_profile_v1()
@@ -2647,9 +2667,10 @@ mod tests {
                     evidence_methods: required.evidence_methods,
                     state: RuntimeBoundaryObservationState::Verified,
                     reason_code: String::from("verified_by_systemd_protected_launcher"),
-                    evidence_identity:
+                    evidence_identity: Some(
                         "sha256:2222222222222222222222222222222222222222222222222222222222222222"
                             .into(),
+                    ),
                 })
                 .collect(),
         };
@@ -2660,6 +2681,21 @@ mod tests {
                 .expect("stable complete launcher instance identity"),
             complete.identity
         );
+        let mut legacy_complete = complete.clone();
+        legacy_complete.schema_version = 2;
+        for observation in &mut legacy_complete.launcher_observations {
+            observation.evidence_identity = None;
+        }
+        for observation in &mut legacy_complete.job_principal_observations {
+            observation.evidence_identity = None;
+        }
+        legacy_complete.identity =
+            systemd_protected_launcher_instance_v2_identity(&legacy_complete)
+                .expect("legacy complete identity remains readable");
+        assert!(systemd_protected_launcher_instance_v2_identity(&legacy_complete).is_ok());
+        let mut stripped_current = complete.clone();
+        stripped_current.launcher_observations[0].evidence_identity = None;
+        assert!(systemd_protected_launcher_instance_v2_identity(&stripped_current).is_err());
         let mut separated_producer_complete = complete.clone();
         separated_producer_complete
             .instance_v1
@@ -2748,15 +2784,15 @@ mod tests {
                 .expect("signing response identity");
         assert_eq!(
             signing_response.claims_identity,
-            "sha256:28d830241f4914c75093f29d425c7bb04638078a7d3be26827e0440dda94d00d"
+            "sha256:7da9a1e97eadf3d3a639372ba50b0531d9069babff7183479089e186ba6bf6d1"
         );
         assert_eq!(
             signing_request.request_identity,
-            "sha256:3a19e57638848e196f2a0b20e5c161b3da3c61d5f7c01abedbb4fc4cd9f132fd"
+            "sha256:2668429cf140f551d1d98119bacc7186a21fcf8103a20b946ee2c83094828893"
         );
         assert_eq!(
             signing_response.response_identity,
-            "sha256:2a484ef59e4b4c98b53b52900282f0fcb25551e0daab142cef056967fbc0ac64"
+            "sha256:2573d38b7233f692542361385f29ca101577fcf7eafcd52c3036a3bd62a5a3cd"
         );
         validate_launcher_attestation_signing_response_v1(&signing_response)
             .expect("valid signing response");
