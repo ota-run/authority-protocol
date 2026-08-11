@@ -182,9 +182,20 @@ can execute:
   credentials exclusively into the separately protected producer service. The launcher binds only
   producer socket metadata and the public verifier set. Its profile identity is
   `sha256:c816a49e01120bf1f793aedcfec094ca0f23a8ee80f1c7e5bed4c2d9c797cb42`.
+- `ota.authority-launcher.systemd/v3` preserves the separated producer boundary, adds bounded
+  `CAP_SYS_PTRACE` for protected job and stopped-child inspection, and grants only ambient
+  `CAP_SETUID` for the launcher's verified transition to the non-root target principal. That
+  transition clears the ambient capability before selected code can execute. The profile also
+  makes effective systemd runtime configuration read-only inside the launcher boundary and replaces
+  `/proc/net/unix` path observation with protected socket metadata and descriptor identity. Its profile identity is
+  `sha256:b5853a12e72c4ca32b0f93a38bc8f1097c7809039b58449f67fcf9019d0ea480`.
 - `ota.authority-job-principal.systemd/v1` fixes the ordered job-peer, execution-principal,
   privilege, process-containment, and process-inspection requirements. Its profile identity is
   `sha256:e69ef375070bbb4f5616ba46b6f29b9a987372909016d1a1dfa40a5d4daae93d`.
+- `ota.authority-job-principal.systemd/v2` permits only the protected primary GID when systemd
+  represents that GID in the kernel supplementary-group vector. Every additional group remains a
+  refusal, and V1 retains its original archive meaning. Its profile identity is
+  `sha256:ee6ea951aff4a80f8a4f93c576a93e3b29245b87d162726c2401c124a7a78659`.
 
 These definitions do not implement systemd, inspect a host, hold an attestor key, or create a
 provider claim. Core and authority-launcher must pin the same immutable protocol revision and

@@ -26,6 +26,14 @@
 
 ## Unreleased
 
+- Add `ota.authority-launcher.systemd/v3` with bounded `CAP_SYS_PTRACE` so the root launcher
+  can re-observe protected job and stopped-child process truth while `ProtectProc=invisible`
+  remains enforced, plus ambient `CAP_SETUID` solely for its verified non-root target-principal
+  transition. Bind effective systemd runtime configuration as read-only launcher state.
+  Add the paired `ota.authority-job-principal.systemd/v2` profile, which permits only the mapped
+  primary GID when systemd represents it in the kernel supplementary-group vector. Existing
+  profile identities and archive meanings remain unchanged.
+
 - Add `ota.authority-launcher.systemd/v2` for the separated protected-attestation producer
   boundary. It preserves V1 verification while removing launcher-owned signing credentials and
   binding the producer socket metadata and public verifier set instead.
@@ -36,6 +44,10 @@
   validity, and producer/verifier freshness maxima while carrying no private credential. These
   records define producer reconciliation only; they do not implement a signing service, broker
   decision, lease, execution, receipt, or provider attestation.
+
+- Require V3 claims, signing requests, and signed attestations to carry instance schema 3 with the
+  exact V3 launcher and V2 job-principal profiles. Legacy instance validation remains available for
+  its original evidence branch and cannot be reinterpreted through a V3 identity.
 
 - Add the identity-bound systemd launcher startup continuation that unlocks Core CLI parsing after
   exact process-posture admission without representing crossing authority. Bind the exact
