@@ -62,6 +62,7 @@ pub const ATTESTATION_RESPONSE: &str = "attestation_response";
 pub const AUTHORIZATION_REQUEST: &str = "authorization_request";
 pub const AUTHORIZATION_DECISION: &str = "authorization_decision";
 pub const AUTHORIZATION_DECISION_ADMISSION: &str = "authorization_decision_admission";
+pub const LEASE_CONSUMPTION_ADMISSION: &str = "lease_consumption_admission";
 pub const LEASE_ISSUANCE: &str = "lease_issuance";
 pub const LEASE_CONSUME: &str = "lease_consume";
 pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
@@ -110,6 +111,10 @@ pub const AUTHORIZATION_DECISION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.authorization-decision-admission.v1\0";
 pub const AUTHORIZATION_DECISION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.authorization-decision-relay.v1\0";
+pub const LEASE_CONSUMPTION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.lease-consumption-admission.v1\0";
+pub const LEASE_CONSUMPTION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.lease-consumption-relay.v1\0";
 pub const LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3: &[u8] =
     b"ota.authority-launcher.attestation-claims.v3\0";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
@@ -804,6 +809,42 @@ pub struct AuthorizationDecisionRelayEvidenceV1 {
     pub admission: AuthorizationDecisionAdmissionV1,
 }
 
+/// Core-authored acknowledgement that one broker lease consumption response was verified and
+/// durably recorded in the crossing transaction. This is local channel evidence, never a broker
+/// authorization decision or a selected-work permit.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseConsumptionAdmissionV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub binding_identity: String,
+    pub prepared_lease_identity: String,
+    pub consume_request_identity: String,
+    pub consume_response_identity: String,
+    pub work_unit_identity: String,
+    pub crossing_transaction_id: String,
+    pub crossing_transaction_identity: String,
+}
+
+/// Launcher-owned durable reconciliation of the exact prepared lease, consume exchange, and
+/// Core persistence acknowledgement. It is bounded bridge evidence; broker signatures remain the
+/// authority and selected execution is deliberately outside this record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseConsumptionRelayEvidenceV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub authorization_decision_relay_identity: String,
+    pub prepared_lease: SignedBrokerMessage<PreparedLeasePayload>,
+    pub prepared_lease_identity: String,
+    pub consume_request: LeaseConsumeRequest,
+    pub consume_request_identity: String,
+    pub consume_response: SignedBrokerMessage<LeaseConsumeResponsePayload>,
+    pub consume_response_identity: String,
+    pub admission: LeaseConsumptionAdmissionV1,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PreparedLeasePayload {
@@ -1067,6 +1108,84 @@ pub fn authorization_decision_relay_evidence_v1_identity(
     let mut canonical = evidence.clone();
     canonical.identity.clear();
     message_identity(AUTHORIZATION_DECISION_RELAY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn lease_consumption_admission_v1_identity(
+    admission: &LeaseConsumptionAdmissionV1,
+) -> Result<String, ProtocolError> {
+    if admission.schema_version != 1
+        || admission.message_kind != LEASE_CONSUMPTION_ADMISSION
+        || !is_sha256_identity(&admission.binding_identity)
+        || !is_sha256_identity(&admission.prepared_lease_identity)
+        || !is_sha256_identity(&admission.consume_request_identity)
+        || !is_sha256_identity(&admission.consume_response_identity)
+        || !is_sha256_identity(&admission.work_unit_identity)
+        || !is_bounded_label(
+            admission.crossing_transaction_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(&admission.crossing_transaction_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = admission.clone();
+    canonical.identity.clear();
+    message_identity(LEASE_CONSUMPTION_ADMISSION_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn lease_consumption_relay_evidence_v1_identity(
+    evidence: &LeaseConsumptionRelayEvidenceV1,
+) -> Result<String, ProtocolError> {
+    let prepared_lease_identity = message_identity(
+        LEASE_ISSUANCE_DOMAIN_V1.as_bytes(),
+        &evidence.prepared_lease,
+    )?;
+    let consume_request_identity = message_identity(
+        LEASE_CONSUME_DOMAIN_V1.as_bytes(),
+        &evidence.consume_request,
+    )?;
+    let consume_response_identity = message_identity(
+        LEASE_CONSUME_RESPONSE_DOMAIN_V1.as_bytes(),
+        &evidence.consume_response,
+    )?;
+    if evidence.schema_version != 1
+        || !is_sha256_identity(&evidence.authorization_decision_relay_identity)
+        || prepared_lease_identity != evidence.prepared_lease_identity
+        || consume_request_identity != evidence.consume_request_identity
+        || consume_response_identity != evidence.consume_response_identity
+        || lease_consumption_admission_v1_identity(&evidence.admission)?
+            != evidence.admission.identity
+        || evidence.admission.binding_identity != evidence.prepared_lease.payload.binding_identity
+        || evidence.admission.prepared_lease_identity != evidence.prepared_lease_identity
+        || evidence.admission.consume_request_identity != evidence.consume_request_identity
+        || evidence.admission.consume_response_identity != evidence.consume_response_identity
+        || evidence.admission.work_unit_identity
+            != evidence.prepared_lease.payload.work_unit_identity
+        || evidence.admission.work_unit_identity != evidence.consume_request.work_unit_identity
+        || evidence.admission.work_unit_identity
+            != evidence.consume_response.payload.work_unit_identity
+        || evidence.admission.crossing_transaction_id
+            != evidence.consume_request.crossing_transaction_id
+        || evidence.admission.crossing_transaction_id
+            != evidence.consume_response.payload.crossing_transaction_id
+        || evidence.admission.crossing_transaction_identity
+            != evidence.consume_request.crossing_transaction_identity
+        || evidence.admission.crossing_transaction_identity
+            != evidence
+                .consume_response
+                .payload
+                .crossing_transaction_identity
+        || evidence.consume_request.lease_identity != evidence.prepared_lease_identity
+        || evidence.consume_response.payload.lease_identity != evidence.prepared_lease_identity
+        || evidence.consume_response.payload.consume_request_identity
+            != evidence.consume_request_identity
+        || evidence.consume_response.payload.state != LeaseConsumeState::Consumed
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = evidence.clone();
+    canonical.identity.clear();
+    message_identity(LEASE_CONSUMPTION_RELAY_IDENTITY_DOMAIN_V1, &canonical)
 }
 
 pub fn launcher_systemd_scope_identity(
@@ -2525,6 +2644,119 @@ mod tests {
                 .expect("substituted admission identity");
         assert_eq!(
             authorization_decision_relay_evidence_v1_identity(&substituted),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn lease_consumption_relay_binds_the_exact_consumed_exchange() {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let prepared_lease = SignedBrokerMessage {
+            payload: PreparedLeasePayload {
+                message_kind: LEASE_ISSUANCE.into(),
+                authorization_decision_identity: identity('1'),
+                binding_identity: identity('2'),
+                authority_id: String::from("release"),
+                attestation_identity: identity('3'),
+                challenge_nonce_commitment: identity('4'),
+                work_unit_identity: identity('5'),
+                contract_identity: identity('6'),
+                semantic_scope_identity: identity('7'),
+                runner_principal: String::from("ota-runner"),
+                broker_revision: 1,
+                lease_sequence: 1,
+                issued_at: String::from("2026-08-12T00:00:00Z"),
+                expires_at: String::from("2026-08-12T00:01:00Z"),
+            },
+            key_id: String::from("broker-key"),
+            algorithm: String::from("ed25519"),
+            signature: String::from("signature"),
+        };
+        let prepared_lease_identity =
+            message_identity(LEASE_ISSUANCE_DOMAIN_V1.as_bytes(), &prepared_lease)
+                .expect("prepared lease identity");
+        let consume_request = LeaseConsumeRequest {
+            message_kind: LEASE_CONSUME.into(),
+            binding_identity: prepared_lease.payload.binding_identity.clone(),
+            lease_identity: prepared_lease_identity.clone(),
+            challenge_nonce_commitment: prepared_lease.payload.challenge_nonce_commitment.clone(),
+            work_unit_identity: prepared_lease.payload.work_unit_identity.clone(),
+            crossing_transaction_id: String::from("crossing-1"),
+            crossing_transaction_identity: identity('8'),
+        };
+        let consume_request_identity =
+            message_identity(LEASE_CONSUME_DOMAIN_V1.as_bytes(), &consume_request)
+                .expect("consume request identity");
+        let consume_response = SignedBrokerMessage {
+            payload: LeaseConsumeResponsePayload {
+                message_kind: LEASE_CONSUME_RESPONSE.into(),
+                consume_request_identity: consume_request_identity.clone(),
+                binding_identity: consume_request.binding_identity.clone(),
+                lease_identity: prepared_lease_identity.clone(),
+                challenge_nonce_commitment: consume_request.challenge_nonce_commitment.clone(),
+                work_unit_identity: consume_request.work_unit_identity.clone(),
+                crossing_transaction_id: consume_request.crossing_transaction_id.clone(),
+                crossing_transaction_identity: consume_request
+                    .crossing_transaction_identity
+                    .clone(),
+                state: LeaseConsumeState::Consumed,
+                broker_revision: 2,
+                consumed_at: String::from("2026-08-12T00:00:01Z"),
+            },
+            key_id: String::from("broker-key"),
+            algorithm: String::from("ed25519"),
+            signature: String::from("signature"),
+        };
+        let consume_response_identity = message_identity(
+            LEASE_CONSUME_RESPONSE_DOMAIN_V1.as_bytes(),
+            &consume_response,
+        )
+        .expect("consume response identity");
+        let mut admission = LeaseConsumptionAdmissionV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: LEASE_CONSUMPTION_ADMISSION.into(),
+            binding_identity: consume_request.binding_identity.clone(),
+            prepared_lease_identity: prepared_lease_identity.clone(),
+            consume_request_identity: consume_request_identity.clone(),
+            consume_response_identity: consume_response_identity.clone(),
+            work_unit_identity: consume_request.work_unit_identity.clone(),
+            crossing_transaction_id: consume_request.crossing_transaction_id.clone(),
+            crossing_transaction_identity: consume_request.crossing_transaction_identity.clone(),
+        };
+        admission.identity = lease_consumption_admission_v1_identity(&admission)
+            .expect("consumption admission identity");
+        let mut evidence = LeaseConsumptionRelayEvidenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            authorization_decision_relay_identity: identity('9'),
+            prepared_lease,
+            prepared_lease_identity,
+            consume_request,
+            consume_request_identity,
+            consume_response,
+            consume_response_identity,
+            admission,
+        };
+        evidence.identity = lease_consumption_relay_evidence_v1_identity(&evidence)
+            .expect("consumption relay identity");
+        assert_eq!(
+            lease_consumption_relay_evidence_v1_identity(&evidence)
+                .expect("stable consumption relay identity"),
+            evidence.identity
+        );
+
+        evidence.consume_response.payload.state = LeaseConsumeState::Revoked;
+        evidence.consume_response_identity = message_identity(
+            LEASE_CONSUME_RESPONSE_DOMAIN_V1.as_bytes(),
+            &evidence.consume_response,
+        )
+        .expect("substituted response identity");
+        evidence.admission.consume_response_identity = evidence.consume_response_identity.clone();
+        evidence.admission.identity = lease_consumption_admission_v1_identity(&evidence.admission)
+            .expect("substituted admission identity");
+        assert_eq!(
+            lease_consumption_relay_evidence_v1_identity(&evidence),
             Err(ProtocolError::InvalidRecord)
         );
     }
