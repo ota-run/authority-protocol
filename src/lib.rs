@@ -264,6 +264,7 @@ pub enum LauncherTerminalStageV1 {
     PreAuthorizationProtocolRefusedBoundaryRemoved,
     AttestationAdmittedBeforeAuthorizationBoundaryRemoved,
     AuthorizationDecisionVerifiedBeforeLeaseBoundaryRemoved,
+    LeaseConsumedBeforeExecutionDisabledBoundaryRemoved,
     BoundaryFailed,
 }
 
@@ -1248,6 +1249,7 @@ pub fn validate_launcher_terminal_frame_v1(
                     | LauncherTerminalStageV1::PreAuthorizationProtocolRefusedBoundaryRemoved
                     | LauncherTerminalStageV1::AttestationAdmittedBeforeAuthorizationBoundaryRemoved
                     | LauncherTerminalStageV1::AuthorizationDecisionVerifiedBeforeLeaseBoundaryRemoved
+                    | LauncherTerminalStageV1::LeaseConsumedBeforeExecutionDisabledBoundaryRemoved
             )
         ) && (frame.outcome != LauncherTerminalOutcomeV1::Refused || frame.exit_code != Some(2))
         || matches!(frame.stage, Some(LauncherTerminalStageV1::BoundaryFailed))
@@ -2550,6 +2552,16 @@ mod tests {
         };
         assert_eq!(
             validate_launcher_terminal_frame_v1(&decision_terminal),
+            Ok(())
+        );
+        let consumption_terminal = LauncherTerminalFrameV1 {
+            stage: Some(
+                LauncherTerminalStageV1::LeaseConsumedBeforeExecutionDisabledBoundaryRemoved,
+            ),
+            ..posture_terminal.clone()
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&consumption_terminal),
             Ok(())
         );
         let authority_refusal_terminal = LauncherTerminalFrameV1 {
