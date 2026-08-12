@@ -63,6 +63,7 @@ pub const AUTHORIZATION_REQUEST: &str = "authorization_request";
 pub const AUTHORIZATION_DECISION: &str = "authorization_decision";
 pub const AUTHORIZATION_DECISION_ADMISSION: &str = "authorization_decision_admission";
 pub const LEASE_CONSUMPTION_ADMISSION: &str = "lease_consumption_admission";
+pub const LEASE_CONSUMPTION_PERSISTENCE: &str = "lease_consumption_persistence";
 pub const LEASE_ISSUANCE: &str = "lease_issuance";
 pub const LEASE_CONSUME: &str = "lease_consume";
 pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
@@ -113,6 +114,8 @@ pub const AUTHORIZATION_DECISION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.authorization-decision-relay.v1\0";
 pub const LEASE_CONSUMPTION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.lease-consumption-admission.v1\0";
+pub const LEASE_CONSUMPTION_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.lease-consumption-persistence.v1\0";
 pub const LEASE_CONSUMPTION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.lease-consumption-relay.v1\0";
 pub const LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3: &[u8] =
@@ -828,6 +831,17 @@ pub struct LeaseConsumptionAdmissionV1 {
     pub crossing_transaction_identity: String,
 }
 
+/// Launcher-authored acknowledgement that the exact consumption relay evidence is durable in
+/// its active-slot journal. Core must receive this before it can finalize execution-disabled use.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseConsumptionPersistenceV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub relay_evidence_identity: String,
+}
+
 /// Launcher-owned durable reconciliation of the exact prepared lease, consume exchange, and
 /// Core persistence acknowledgement. It is bounded bridge evidence; broker signatures remain the
 /// authority and selected execution is deliberately outside this record.
@@ -1132,6 +1146,20 @@ pub fn lease_consumption_admission_v1_identity(
     let mut canonical = admission.clone();
     canonical.identity.clear();
     message_identity(LEASE_CONSUMPTION_ADMISSION_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn lease_consumption_persistence_v1_identity(
+    persistence: &LeaseConsumptionPersistenceV1,
+) -> Result<String, ProtocolError> {
+    if persistence.schema_version != 1
+        || persistence.message_kind != LEASE_CONSUMPTION_PERSISTENCE
+        || !is_sha256_identity(&persistence.relay_evidence_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = persistence.clone();
+    canonical.identity.clear();
+    message_identity(LEASE_CONSUMPTION_PERSISTENCE_IDENTITY_DOMAIN_V1, &canonical)
 }
 
 pub fn lease_consumption_relay_evidence_v1_identity(
