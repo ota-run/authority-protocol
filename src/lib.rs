@@ -63,6 +63,7 @@ pub const AUTHORIZATION_REQUEST: &str = "authorization_request";
 pub const AUTHORIZATION_DECISION: &str = "authorization_decision";
 pub const AUTHORIZATION_DECISION_ADMISSION: &str = "authorization_decision_admission";
 pub const LEASE_CONSUMPTION_ADMISSION: &str = "lease_consumption_admission";
+pub const LEASE_CONSUMPTION_INTENT_PERSISTENCE: &str = "lease_consumption_intent_persistence";
 pub const LEASE_CONSUMPTION_PERSISTENCE: &str = "lease_consumption_persistence";
 pub const LEASE_ISSUANCE: &str = "lease_issuance";
 pub const LEASE_CONSUME: &str = "lease_consume";
@@ -114,6 +115,10 @@ pub const AUTHORIZATION_DECISION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.authorization-decision-relay.v1\0";
 pub const LEASE_CONSUMPTION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.lease-consumption-admission.v1\0";
+pub const LEASE_CONSUMPTION_INTENT_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.lease-consumption-intent-relay.v1\0";
+pub const LEASE_CONSUMPTION_INTENT_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.lease-consumption-intent-persistence.v1\0";
 pub const LEASE_CONSUMPTION_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.lease-consumption-persistence.v1\0";
 pub const LEASE_CONSUMPTION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
@@ -831,6 +836,30 @@ pub struct LeaseConsumptionAdmissionV1 {
     pub crossing_transaction_identity: String,
 }
 
+/// Launcher-owned durable intent recorded before the consume request reaches the broker.
+/// This is the protected carrier journal for the execution-disabled systemd path.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseConsumptionIntentRelayEvidenceV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub authorization_decision_relay_identity: String,
+    pub prepared_lease: SignedBrokerMessage<PreparedLeasePayload>,
+    pub prepared_lease_identity: String,
+    pub consume_request: LeaseConsumeRequest,
+    pub consume_request_identity: String,
+}
+
+/// Launcher acknowledgement that the exact consume intent is fsynced before broker forwarding.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseConsumptionIntentPersistenceV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub consumption_intent_identity: String,
+}
+
 /// Launcher-authored acknowledgement that the exact consumption relay evidence is durable in
 /// its active-slot journal. Core must receive this before it can finalize execution-disabled use.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1146,6 +1175,54 @@ pub fn lease_consumption_admission_v1_identity(
     let mut canonical = admission.clone();
     canonical.identity.clear();
     message_identity(LEASE_CONSUMPTION_ADMISSION_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn lease_consumption_intent_relay_evidence_v1_identity(
+    evidence: &LeaseConsumptionIntentRelayEvidenceV1,
+) -> Result<String, ProtocolError> {
+    let prepared_lease_identity = message_identity(
+        LEASE_ISSUANCE_DOMAIN_V1.as_bytes(),
+        &evidence.prepared_lease,
+    )?;
+    let consume_request_identity = message_identity(
+        LEASE_CONSUME_DOMAIN_V1.as_bytes(),
+        &evidence.consume_request,
+    )?;
+    if evidence.schema_version != 1
+        || !is_sha256_identity(&evidence.authorization_decision_relay_identity)
+        || prepared_lease_identity != evidence.prepared_lease_identity
+        || consume_request_identity != evidence.consume_request_identity
+        || evidence.consume_request.lease_identity != evidence.prepared_lease_identity
+        || evidence.consume_request.binding_identity
+            != evidence.prepared_lease.payload.binding_identity
+        || evidence.consume_request.work_unit_identity
+            != evidence.prepared_lease.payload.work_unit_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = evidence.clone();
+    canonical.identity.clear();
+    message_identity(
+        LEASE_CONSUMPTION_INTENT_RELAY_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn lease_consumption_intent_persistence_v1_identity(
+    persistence: &LeaseConsumptionIntentPersistenceV1,
+) -> Result<String, ProtocolError> {
+    if persistence.schema_version != 1
+        || persistence.message_kind != LEASE_CONSUMPTION_INTENT_PERSISTENCE
+        || !is_sha256_identity(&persistence.consumption_intent_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = persistence.clone();
+    canonical.identity.clear();
+    message_identity(
+        LEASE_CONSUMPTION_INTENT_PERSISTENCE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
 }
 
 pub fn lease_consumption_persistence_v1_identity(
@@ -2727,6 +2804,28 @@ mod tests {
         let consume_request_identity =
             message_identity(LEASE_CONSUME_DOMAIN_V1.as_bytes(), &consume_request)
                 .expect("consume request identity");
+        let mut intent = LeaseConsumptionIntentRelayEvidenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            authorization_decision_relay_identity: identity('9'),
+            prepared_lease: prepared_lease.clone(),
+            prepared_lease_identity: prepared_lease_identity.clone(),
+            consume_request: consume_request.clone(),
+            consume_request_identity: consume_request_identity.clone(),
+        };
+        intent.identity = lease_consumption_intent_relay_evidence_v1_identity(&intent)
+            .expect("consumption intent identity");
+        assert_eq!(
+            lease_consumption_intent_relay_evidence_v1_identity(&intent)
+                .expect("stable consumption intent identity"),
+            intent.identity
+        );
+        let mut substituted_intent = intent.clone();
+        substituted_intent.consume_request.work_unit_identity = identity('a');
+        assert_eq!(
+            lease_consumption_intent_relay_evidence_v1_identity(&substituted_intent),
+            Err(ProtocolError::InvalidRecord)
+        );
         let consume_response = SignedBrokerMessage {
             payload: LeaseConsumeResponsePayload {
                 message_kind: LEASE_CONSUME_RESPONSE.into(),
