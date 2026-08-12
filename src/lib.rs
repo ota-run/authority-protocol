@@ -839,7 +839,7 @@ pub struct LeaseConsumptionPersistenceV1 {
     pub schema_version: u32,
     pub identity: String,
     pub message_kind: String,
-    pub relay_evidence_identity: String,
+    pub consumption_admission_identity: String,
 }
 
 /// Launcher-owned durable reconciliation of the exact prepared lease, consume exchange, and
@@ -1153,7 +1153,7 @@ pub fn lease_consumption_persistence_v1_identity(
 ) -> Result<String, ProtocolError> {
     if persistence.schema_version != 1
         || persistence.message_kind != LEASE_CONSUMPTION_PERSISTENCE
-        || !is_sha256_identity(&persistence.relay_evidence_identity)
+        || !is_sha256_identity(&persistence.consumption_admission_identity)
     {
         return Err(ProtocolError::InvalidRecord);
     }
