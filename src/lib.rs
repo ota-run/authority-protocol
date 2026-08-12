@@ -2802,6 +2802,30 @@ mod tests {
     }
 
     #[test]
+    fn lease_consumption_persistence_binds_the_exact_core_admission() {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let mut persistence = LeaseConsumptionPersistenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: LEASE_CONSUMPTION_PERSISTENCE.into(),
+            consumption_admission_identity: identity('a'),
+        };
+        persistence.identity =
+            lease_consumption_persistence_v1_identity(&persistence).expect("persistence identity");
+        assert_eq!(
+            lease_consumption_persistence_v1_identity(&persistence)
+                .expect("stable persistence identity"),
+            persistence.identity
+        );
+        persistence.consumption_admission_identity = identity('b');
+        assert_ne!(
+            lease_consumption_persistence_v1_identity(&persistence)
+                .expect("substituted persistence identity"),
+            persistence.identity
+        );
+    }
+
+    #[test]
     fn message_identity_is_canonical() {
         let first = serde_json::json!({"b": 2, "a": 1});
         let second = serde_json::json!({"a": 1, "b": 2});
