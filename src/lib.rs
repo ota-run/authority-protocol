@@ -76,6 +76,9 @@ pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST: &str = "launcher_attestation_sig
 pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE: &str = "launcher_attestation_signing_response";
 pub const LAUNCHER_OUTPUT: &str = "launcher_output";
 pub const LAUNCHER_TERMINAL: &str = "launcher_terminal";
+pub const LAUNCHER_EXECUTION_COMPLETION: &str = "launcher_execution_completion";
+pub const LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE: &str =
+    "launcher_execution_completion_persistence";
 
 pub const CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.challenge.v1\0";
 pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.v1\0";
@@ -123,6 +126,12 @@ pub const LEASE_CONSUMPTION_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.lease-consumption-persistence.v1\0";
 pub const LEASE_CONSUMPTION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.lease-consumption-relay.v1\0";
+pub const LAUNCHER_EXECUTION_COMPLETION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.execution-completion.v1\0";
+pub const LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.execution-completion-persistence.v1\0";
+pub const LAUNCHER_EXECUTION_FINALIZATION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.execution-finalization.v1\0";
 pub const LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3: &[u8] =
     b"ota.authority-launcher.attestation-claims.v3\0";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
@@ -273,7 +282,63 @@ pub enum LauncherTerminalStageV1 {
     AttestationAdmittedBeforeAuthorizationBoundaryRemoved,
     AuthorizationDecisionVerifiedBeforeLeaseBoundaryRemoved,
     LeaseConsumedBeforeExecutionDisabledBoundaryRemoved,
+    SelectedExecutionCompletedBoundaryRemoved,
+    SelectedExecutionFailedBoundaryRemoved,
+    SelectedExecutionInterruptedBoundaryRemoved,
     BoundaryFailed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherExecutionOutcomeV1 {
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+/// Core-authored selected-work result. This is persisted before the protected child exits, but it
+/// is not launcher cleanup evidence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherExecutionCompletionV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub invocation_id: String,
+    pub lease_consumption_admission_identity: String,
+    pub work_unit_identity: String,
+    pub crossing_transaction_id: String,
+    pub pending_crossing_transaction_identity: String,
+    pub crossing_transaction_identity: String,
+    pub outcome: LauncherExecutionOutcomeV1,
+    pub exit_code: Option<i32>,
+    pub receipt_status: String,
+}
+
+/// Launcher acknowledgement that the exact Core completion is durable in the active-slot journal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherExecutionCompletionPersistenceV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub completion_identity: String,
+}
+
+/// Launcher-authored evidence emitted only after the exact child and systemd boundary are absent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherExecutionFinalizationV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub completion: LauncherExecutionCompletionV1,
+    pub child_identity: String,
+    pub scope_identity: String,
+    pub observed_exit_code: Option<i32>,
+    pub child_reaped: bool,
+    pub scope_removed: bool,
+    pub cgroup_empty_or_absent: bool,
+    pub active_slot_removed: bool,
 }
 
 /// The sole terminal frame for one launcher invocation. A client must not treat any output frame
@@ -288,6 +353,8 @@ pub struct LauncherTerminalFrameV1 {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage: Option<LauncherTerminalStageV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalization: Option<LauncherExecutionFinalizationV1>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1322,6 +1389,86 @@ pub fn launcher_systemd_scope_identity(
     message_identity(LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1, &canonical)
 }
 
+pub fn launcher_execution_completion_v1_identity(
+    completion: &LauncherExecutionCompletionV1,
+) -> Result<String, ProtocolError> {
+    let valid_exit = match completion.outcome {
+        LauncherExecutionOutcomeV1::Completed => completion.exit_code == Some(0),
+        LauncherExecutionOutcomeV1::Failed => completion.exit_code.is_some_and(|code| code != 0),
+        LauncherExecutionOutcomeV1::Interrupted => completion
+            .exit_code
+            .is_some_and(|code| matches!(code, 129 | 130 | 131 | 143)),
+    };
+    if completion.schema_version != 1
+        || completion.message_kind != LAUNCHER_EXECUTION_COMPLETION
+        || !is_bounded_label(
+            completion.invocation_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(&completion.lease_consumption_admission_identity)
+        || !is_sha256_identity(&completion.work_unit_identity)
+        || !is_bounded_label(
+            completion.crossing_transaction_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(&completion.pending_crossing_transaction_identity)
+        || !is_sha256_identity(&completion.crossing_transaction_identity)
+        || completion.receipt_status.is_empty()
+        || completion.receipt_status.len() > 256
+        || completion
+            .receipt_status
+            .bytes()
+            .any(|byte| byte.is_ascii_control())
+        || !valid_exit
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = completion.clone();
+    canonical.identity.clear();
+    message_identity(LAUNCHER_EXECUTION_COMPLETION_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_execution_completion_persistence_v1_identity(
+    persistence: &LauncherExecutionCompletionPersistenceV1,
+) -> Result<String, ProtocolError> {
+    if persistence.schema_version != 1
+        || persistence.message_kind != LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE
+        || !is_sha256_identity(&persistence.completion_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = persistence.clone();
+    canonical.identity.clear();
+    message_identity(
+        LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_execution_finalization_v1_identity(
+    finalization: &LauncherExecutionFinalizationV1,
+) -> Result<String, ProtocolError> {
+    if finalization.schema_version != 1
+        || launcher_execution_completion_v1_identity(&finalization.completion)?
+            != finalization.completion.identity
+        || !is_sha256_identity(&finalization.child_identity)
+        || !is_sha256_identity(&finalization.scope_identity)
+        || finalization.observed_exit_code != finalization.completion.exit_code
+        || !finalization.child_reaped
+        || !finalization.scope_removed
+        || !finalization.cgroup_empty_or_absent
+        || !finalization.active_slot_removed
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = finalization.clone();
+    canonical.identity.clear();
+    message_identity(
+        LAUNCHER_EXECUTION_FINALIZATION_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
 pub fn validate_launcher_output_frame_v1(
     frame: &LauncherOutputFrameV1,
 ) -> Result<(), ProtocolError> {
@@ -1338,12 +1485,64 @@ pub fn validate_launcher_output_frame_v1(
 pub fn validate_launcher_terminal_frame_v1(
     frame: &LauncherTerminalFrameV1,
 ) -> Result<(), ProtocolError> {
+    let selected_stage = matches!(
+        frame.stage,
+        Some(
+            LauncherTerminalStageV1::SelectedExecutionCompletedBoundaryRemoved
+                | LauncherTerminalStageV1::SelectedExecutionFailedBoundaryRemoved
+                | LauncherTerminalStageV1::SelectedExecutionInterruptedBoundaryRemoved
+        )
+    );
+    let finalization_valid = match (&frame.stage, &frame.finalization) {
+        (
+            Some(LauncherTerminalStageV1::SelectedExecutionCompletedBoundaryRemoved),
+            Some(finalization),
+        ) => {
+            finalization.completion.outcome == LauncherExecutionOutcomeV1::Completed
+                && frame.invocation_id == finalization.completion.invocation_id
+                && frame.outcome == LauncherTerminalOutcomeV1::Completed
+                && frame.exit_code == Some(0)
+                && launcher_execution_finalization_v1_identity(finalization)
+                    .ok()
+                    .as_deref()
+                    == Some(finalization.identity.as_str())
+        }
+        (
+            Some(LauncherTerminalStageV1::SelectedExecutionFailedBoundaryRemoved),
+            Some(finalization),
+        ) => {
+            finalization.completion.outcome == LauncherExecutionOutcomeV1::Failed
+                && frame.invocation_id == finalization.completion.invocation_id
+                && frame.outcome == LauncherTerminalOutcomeV1::Failed
+                && frame.exit_code == finalization.observed_exit_code
+                && launcher_execution_finalization_v1_identity(finalization)
+                    .ok()
+                    .as_deref()
+                    == Some(finalization.identity.as_str())
+        }
+        (
+            Some(LauncherTerminalStageV1::SelectedExecutionInterruptedBoundaryRemoved),
+            Some(finalization),
+        ) => {
+            finalization.completion.outcome == LauncherExecutionOutcomeV1::Interrupted
+                && frame.invocation_id == finalization.completion.invocation_id
+                && frame.outcome == LauncherTerminalOutcomeV1::Cancelled
+                && frame.exit_code == finalization.observed_exit_code
+                && launcher_execution_finalization_v1_identity(finalization)
+                    .ok()
+                    .as_deref()
+                    == Some(finalization.identity.as_str())
+        }
+        (_, None) if !selected_stage => true,
+        _ => false,
+    };
     if frame.message_kind != LAUNCHER_TERMINAL
         || frame.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
         || !is_bounded_label(&frame.invocation_id, MAX_LAUNCHER_INVOCATION_ID_BYTES_V1)
         || matches!(frame.outcome, LauncherTerminalOutcomeV1::Completed)
             && frame.exit_code != Some(0)
-        || matches!(frame.outcome, LauncherTerminalOutcomeV1::Cancelled)
+        || !selected_stage
+            && matches!(frame.outcome, LauncherTerminalOutcomeV1::Cancelled)
             && frame.exit_code.is_some()
         || matches!(
             frame.stage,
@@ -1359,6 +1558,7 @@ pub fn validate_launcher_terminal_frame_v1(
         ) && (frame.outcome != LauncherTerminalOutcomeV1::Refused || frame.exit_code != Some(2))
         || matches!(frame.stage, Some(LauncherTerminalStageV1::BoundaryFailed))
             && (frame.outcome != LauncherTerminalOutcomeV1::Failed || frame.exit_code != Some(1))
+        || !finalization_valid
     {
         return Err(ProtocolError::InvalidRecord);
     }
@@ -2617,6 +2817,7 @@ mod tests {
             outcome: LauncherTerminalOutcomeV1::Completed,
             exit_code: Some(0),
             stage: None,
+            finalization: None,
         };
         assert_eq!(validate_launcher_terminal_frame_v1(&complete), Ok(()));
 
@@ -2634,6 +2835,7 @@ mod tests {
             outcome: LauncherTerminalOutcomeV1::Refused,
             exit_code: Some(2),
             stage: Some(LauncherTerminalStageV1::PostureAdmittedBoundaryRemoved),
+            finalization: None,
         };
         assert_eq!(
             validate_launcher_terminal_frame_v1(&posture_terminal),
@@ -2692,6 +2894,119 @@ mod tests {
         };
         assert_eq!(
             validate_launcher_terminal_frame_v1(&contradictory_stage),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn selected_execution_terminal_binds_completion_persistence_and_cleanup() {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let mut completion = LauncherExecutionCompletionV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: LAUNCHER_EXECUTION_COMPLETION.into(),
+            invocation_id: "request-123".into(),
+            lease_consumption_admission_identity: identity('1'),
+            work_unit_identity: identity('2'),
+            crossing_transaction_id: "crossing-123".into(),
+            pending_crossing_transaction_identity: identity('8'),
+            crossing_transaction_identity: identity('3'),
+            outcome: LauncherExecutionOutcomeV1::Completed,
+            exit_code: Some(0),
+            receipt_status: "recorded".into(),
+        };
+        completion.identity =
+            launcher_execution_completion_v1_identity(&completion).expect("completion identity");
+
+        let mut persistence = LauncherExecutionCompletionPersistenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE.into(),
+            completion_identity: completion.identity.clone(),
+        };
+        persistence.identity = launcher_execution_completion_persistence_v1_identity(&persistence)
+            .expect("persistence identity");
+        assert_eq!(
+            launcher_execution_completion_persistence_v1_identity(&persistence)
+                .expect("stable persistence identity"),
+            persistence.identity
+        );
+
+        let mut finalization = LauncherExecutionFinalizationV1 {
+            schema_version: 1,
+            identity: String::new(),
+            completion,
+            child_identity: identity('4'),
+            scope_identity: identity('5'),
+            observed_exit_code: Some(0),
+            child_reaped: true,
+            scope_removed: true,
+            cgroup_empty_or_absent: true,
+            active_slot_removed: true,
+        };
+        finalization.identity = launcher_execution_finalization_v1_identity(&finalization)
+            .expect("finalization identity");
+        let terminal = LauncherTerminalFrameV1 {
+            message_kind: LAUNCHER_TERMINAL.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            invocation_id: "request-123".into(),
+            outcome: LauncherTerminalOutcomeV1::Completed,
+            exit_code: Some(0),
+            stage: Some(LauncherTerminalStageV1::SelectedExecutionCompletedBoundaryRemoved),
+            finalization: Some(finalization.clone()),
+        };
+        assert_eq!(validate_launcher_terminal_frame_v1(&terminal), Ok(()));
+
+        let mut interrupted = finalization.clone();
+        interrupted.completion.outcome = LauncherExecutionOutcomeV1::Interrupted;
+        interrupted.completion.exit_code = Some(130);
+        interrupted.completion.identity =
+            launcher_execution_completion_v1_identity(&interrupted.completion)
+                .expect("interrupted completion identity");
+        interrupted.observed_exit_code = Some(130);
+        interrupted.identity = launcher_execution_finalization_v1_identity(&interrupted)
+            .expect("interrupted finalization identity");
+        let interrupted_terminal = LauncherTerminalFrameV1 {
+            outcome: LauncherTerminalOutcomeV1::Cancelled,
+            exit_code: Some(130),
+            stage: Some(LauncherTerminalStageV1::SelectedExecutionInterruptedBoundaryRemoved),
+            finalization: Some(interrupted),
+            ..terminal.clone()
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&interrupted_terminal),
+            Ok(())
+        );
+
+        let mut missing_cleanup = finalization.clone();
+        missing_cleanup.scope_removed = false;
+        assert_eq!(
+            launcher_execution_finalization_v1_identity(&missing_cleanup),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut substituted_child = finalization.clone();
+        substituted_child.child_identity = identity('6');
+        assert_ne!(
+            launcher_execution_finalization_v1_identity(&substituted_child)
+                .expect("substituted identity"),
+            finalization.identity
+        );
+        let mut wrong_stage = terminal;
+        wrong_stage.stage = Some(LauncherTerminalStageV1::SelectedExecutionFailedBoundaryRemoved);
+        wrong_stage.outcome = LauncherTerminalOutcomeV1::Failed;
+        wrong_stage.exit_code = Some(1);
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&wrong_stage),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut wrong_invocation = wrong_stage;
+        wrong_invocation.stage =
+            Some(LauncherTerminalStageV1::SelectedExecutionCompletedBoundaryRemoved);
+        wrong_invocation.outcome = LauncherTerminalOutcomeV1::Completed;
+        wrong_invocation.exit_code = Some(0);
+        wrong_invocation.invocation_id = String::from("request-substituted");
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&wrong_invocation),
             Err(ProtocolError::InvalidRecord)
         );
     }

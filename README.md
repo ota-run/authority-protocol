@@ -81,6 +81,13 @@ sequenceDiagram
         Launcher-->>Core: Relay transaction-bound consumption result
         alt Lease is verified as consumed
             Core->>Core: Execute only the exact authorized work unit
+            Core->>Core: Finalize crossing transaction and receipt
+            Core->>Launcher: execution_completion
+            Launcher->>Launcher: Persist exact completion before child exit
+            Launcher-->>Core: execution_completion_persistence
+            Core-->>Launcher: Exit after receipt/archive work
+            Launcher->>Launcher: Reap child and remove exact scope/cgroup/active slot
+            Launcher-->>Core: Terminal finalization is emitted to the outer client
         else Consumption is refused or ambiguous
             Core->>Core: Refuse before governed execution
         end
@@ -109,6 +116,15 @@ second authority decision and not a lease. Recovery adds `lease_consumption_quer
 `lease_consume_response` bound to the pending crossing transaction. Recovery never resumes that
 old work unit: it reconciles the broker result, finalizes the abandoned local transaction as
 incomplete, and requires a new authorization for any later execution.
+
+For the protected systemd carrier, selected execution adds two private Core-to-launcher messages.
+`launcher_execution_completion` binds the terminal crossing transaction, receipt posture, exact
+work unit, and consumed-lease admission. The launcher durably journals that record before replying
+with `launcher_execution_completion_persistence`. After Core exits, the launcher reaps the exact
+child, removes the exact scope and cgroup, removes the active slot, and emits one
+`LauncherExecutionFinalizationV1` inside the outer terminal frame. Completion is not cleanup
+evidence; finalization is valid only when all four removal checks are true and the observed child
+exit matches the Core-authored completion.
 
 ## Runtime-boundary attestation
 
@@ -218,10 +234,12 @@ service returns ordered binary-safe `launcher_output` frames followed by exactly
 `launcher_terminal` frame. New V1 terminals may add a typed stage that distinguishes refusal before
 boundary creation, posture admission followed by exact boundary removal, authority refusal
 followed by exact boundary removal, pre-authorization protocol refusal followed by exact boundary
-removal, V3 attestation admission before authorization followed by exact boundary removal, and
-boundary failure. The field is additive so legacy V1 terminals remain readable; consumers must
-require the specific stage needed for any stronger proof claim rather than inferring it from an
-exit code.
+removal, V3 attestation admission before authorization followed by exact boundary removal,
+selected execution completion/failure/interruption followed by exact boundary removal, and
+boundary failure. Selected-execution terminals require an identity-bound finalization record;
+refusal terminals cannot carry one. The field is additive so legacy V1 terminals remain readable;
+consumers must require the specific stage needed for any stronger proof claim rather than
+inferring it from an exit code.
 
 The protocol also publishes content-addressed identities for that exact request, the retained
 working-directory device/inode, the stopped fixed-binary child, and its exact non-delegated

@@ -26,6 +26,12 @@
 
 ## Unreleased
 
+- Add the protected systemd selected-execution completion and finalization protocol. Core reports
+  one identity-bound terminal crossing transaction and receipt outcome; the launcher persists that
+  exact completion before acknowledging it, then emits finalization only after the exact child is
+  reaped and the recorded scope, cgroup, and active slot are absent. Completion and cleanup remain
+  separate identities, and interrupted execution carries a concrete process exit posture.
+
 - Add the execution-disabled authorization-decision relay envelope. Core acknowledges one exact
   verified signed decision through `authorization_decision_admission`; the launcher binds that
   acknowledgement and signed decision in `AuthorizationDecisionRelayEvidenceV1`. Add the distinct
