@@ -61,6 +61,7 @@ pub const CHALLENGE_REQUEST: &str = "challenge_request";
 pub const ATTESTATION_RESPONSE: &str = "attestation_response";
 pub const AUTHORIZATION_REQUEST: &str = "authorization_request";
 pub const AUTHORIZATION_DECISION: &str = "authorization_decision";
+pub const AUTHORIZATION_DECISION_ADMISSION: &str = "authorization_decision_admission";
 pub const LEASE_ISSUANCE: &str = "lease_issuance";
 pub const LEASE_CONSUME: &str = "lease_consume";
 pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
@@ -105,6 +106,10 @@ pub const LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.systemd-scope.v1\0";
 pub const LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.startup-continuation.v1\0";
+pub const AUTHORIZATION_DECISION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.authorization-decision-admission.v1\0";
+pub const AUTHORIZATION_DECISION_RELAY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.authorization-decision-relay.v1\0";
 pub const LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3: &[u8] =
     b"ota.authority-launcher.attestation-claims.v3\0";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
@@ -253,6 +258,7 @@ pub enum LauncherTerminalStageV1 {
     AuthorityRefusedBoundaryRemoved,
     PreAuthorizationProtocolRefusedBoundaryRemoved,
     AttestationAdmittedBeforeAuthorizationBoundaryRemoved,
+    AuthorizationDecisionVerifiedBeforeLeaseBoundaryRemoved,
     BoundaryFailed,
 }
 
@@ -766,6 +772,38 @@ pub struct AuthorizationDecisionPayload {
     pub expires_at: String,
 }
 
+/// Core-authored acknowledgement that one signed broker decision was verified on the protected
+/// launcher session. This record is channel-bound integrity evidence, not broker authority.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationDecisionAdmissionV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub authorization_decision_identity: String,
+    pub binding_identity: String,
+    pub attestation_identity: String,
+    pub work_unit_identity: String,
+    pub contract_identity: String,
+    pub semantic_scope_identity: String,
+    pub decision: AuthorizationDecision,
+}
+
+/// Launcher-owned durable reconciliation of one relayed signed decision and Core's exact
+/// verification acknowledgement. The signed decision remains the authority; this envelope only
+/// proves what crossed the protected local session before cleanup.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationDecisionRelayEvidenceV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub request_identity: String,
+    pub authorization_decision: SignedBrokerMessage<AuthorizationDecisionPayload>,
+    pub authorization_decision_identity: String,
+    pub admission: AuthorizationDecisionAdmissionV1,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PreparedLeasePayload {
@@ -970,6 +1008,67 @@ pub fn launcher_startup_continuation_identity(
     message_identity(LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1, &canonical)
 }
 
+pub fn authorization_decision_admission_v1_identity(
+    admission: &AuthorizationDecisionAdmissionV1,
+) -> Result<String, ProtocolError> {
+    if admission.schema_version != 1
+        || admission.message_kind != AUTHORIZATION_DECISION_ADMISSION
+        || !is_sha256_identity(&admission.request_identity)
+        || !is_sha256_identity(&admission.authorization_decision_identity)
+        || !is_sha256_identity(&admission.binding_identity)
+        || !is_sha256_identity(&admission.attestation_identity)
+        || !is_sha256_identity(&admission.work_unit_identity)
+        || !is_sha256_identity(&admission.contract_identity)
+        || !is_sha256_identity(&admission.semantic_scope_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = admission.clone();
+    canonical.identity.clear();
+    message_identity(
+        AUTHORIZATION_DECISION_ADMISSION_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn authorization_decision_relay_evidence_v1_identity(
+    evidence: &AuthorizationDecisionRelayEvidenceV1,
+) -> Result<String, ProtocolError> {
+    let decision_identity = message_identity(
+        AUTHORIZATION_DECISION_DOMAIN_V1.as_bytes(),
+        &evidence.authorization_decision,
+    )?;
+    if evidence.schema_version != 1
+        || !is_sha256_identity(&evidence.request_identity)
+        || decision_identity != evidence.authorization_decision_identity
+        || authorization_decision_admission_v1_identity(&evidence.admission)?
+            != evidence.admission.identity
+        || evidence.admission.request_identity != evidence.request_identity
+        || evidence.authorization_decision.payload.request_identity != evidence.request_identity
+        || evidence.admission.authorization_decision_identity
+            != evidence.authorization_decision_identity
+        || evidence.admission.binding_identity
+            != evidence.authorization_decision.payload.binding_identity
+        || evidence.admission.attestation_identity
+            != evidence.authorization_decision.payload.attestation_identity
+        || evidence.admission.work_unit_identity
+            != evidence.authorization_decision.payload.work_unit_identity
+        || evidence.admission.contract_identity
+            != evidence.authorization_decision.payload.contract_identity
+        || evidence.admission.semantic_scope_identity
+            != evidence
+                .authorization_decision
+                .payload
+                .semantic_scope_identity
+        || evidence.admission.decision != evidence.authorization_decision.payload.decision
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = evidence.clone();
+    canonical.identity.clear();
+    message_identity(AUTHORIZATION_DECISION_RELAY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
 pub fn launcher_systemd_scope_identity(
     scope: &LauncherSystemdScopeV1,
 ) -> Result<String, ProtocolError> {
@@ -1029,6 +1128,7 @@ pub fn validate_launcher_terminal_frame_v1(
                     | LauncherTerminalStageV1::AuthorityRefusedBoundaryRemoved
                     | LauncherTerminalStageV1::PreAuthorizationProtocolRefusedBoundaryRemoved
                     | LauncherTerminalStageV1::AttestationAdmittedBeforeAuthorizationBoundaryRemoved
+                    | LauncherTerminalStageV1::AuthorizationDecisionVerifiedBeforeLeaseBoundaryRemoved
             )
         ) && (frame.outcome != LauncherTerminalOutcomeV1::Refused || frame.exit_code != Some(2))
         || matches!(frame.stage, Some(LauncherTerminalStageV1::BoundaryFailed))
@@ -2323,6 +2423,16 @@ mod tests {
             validate_launcher_terminal_frame_v1(&attestation_terminal),
             Ok(())
         );
+        let decision_terminal = LauncherTerminalFrameV1 {
+            stage: Some(
+                LauncherTerminalStageV1::AuthorizationDecisionVerifiedBeforeLeaseBoundaryRemoved,
+            ),
+            ..posture_terminal.clone()
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&decision_terminal),
+            Ok(())
+        );
         let authority_refusal_terminal = LauncherTerminalFrameV1 {
             stage: Some(LauncherTerminalStageV1::AuthorityRefusedBoundaryRemoved),
             ..posture_terminal.clone()
@@ -2346,6 +2456,75 @@ mod tests {
         };
         assert_eq!(
             validate_launcher_terminal_frame_v1(&contradictory_stage),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn authorization_decision_relay_binds_core_verification() {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let request_identity = identity('1');
+        let decision = SignedBrokerMessage {
+            payload: AuthorizationDecisionPayload {
+                message_kind: AUTHORIZATION_DECISION.into(),
+                request_identity: request_identity.clone(),
+                binding_identity: identity('2'),
+                authority_id: String::from("release"),
+                attestation_identity: identity('3'),
+                challenge_nonce_commitment: identity('4'),
+                work_unit_identity: identity('5'),
+                contract_identity: identity('6'),
+                semantic_scope_identity: identity('7'),
+                decision: AuthorizationDecision::Allowed,
+                approval_reference: Some(String::from("approval:1")),
+                broker_revision: 1,
+                issued_at: String::from("2026-08-11T00:00:00Z"),
+                expires_at: String::from("2026-08-11T00:01:00Z"),
+            },
+            key_id: String::from("broker-key"),
+            algorithm: String::from("ed25519"),
+            signature: String::from("signature"),
+        };
+        let decision_identity =
+            message_identity(AUTHORIZATION_DECISION_DOMAIN_V1.as_bytes(), &decision)
+                .expect("decision identity");
+        let mut admission = AuthorizationDecisionAdmissionV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: AUTHORIZATION_DECISION_ADMISSION.into(),
+            request_identity: request_identity.clone(),
+            authorization_decision_identity: decision_identity.clone(),
+            binding_identity: decision.payload.binding_identity.clone(),
+            attestation_identity: decision.payload.attestation_identity.clone(),
+            work_unit_identity: decision.payload.work_unit_identity.clone(),
+            contract_identity: decision.payload.contract_identity.clone(),
+            semantic_scope_identity: decision.payload.semantic_scope_identity.clone(),
+            decision: AuthorizationDecision::Allowed,
+        };
+        admission.identity =
+            authorization_decision_admission_v1_identity(&admission).expect("admission identity");
+        let mut evidence = AuthorizationDecisionRelayEvidenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            request_identity,
+            authorization_decision: decision,
+            authorization_decision_identity: decision_identity,
+            admission,
+        };
+        evidence.identity = authorization_decision_relay_evidence_v1_identity(&evidence)
+            .expect("relay evidence identity");
+        assert_eq!(
+            authorization_decision_relay_evidence_v1_identity(&evidence)
+                .expect("stable relay identity"),
+            evidence.identity
+        );
+        let mut substituted = evidence;
+        substituted.admission.semantic_scope_identity = identity('8');
+        substituted.admission.identity =
+            authorization_decision_admission_v1_identity(&substituted.admission)
+                .expect("substituted admission identity");
+        assert_eq!(
+            authorization_decision_relay_evidence_v1_identity(&substituted),
             Err(ProtocolError::InvalidRecord)
         );
     }

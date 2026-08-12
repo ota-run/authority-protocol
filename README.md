@@ -69,6 +69,7 @@ sequenceDiagram
     Launcher->>Broker: Relay exact-scope request
     Broker-->>Launcher: authorization_decision (signed)
     Launcher-->>Core: Relay signed decision
+    Core-->>Launcher: authorization_decision_admission (identity-bound acknowledgement)
 
     alt Authorization is allowed
         Broker-->>Launcher: lease_issuance (signed)
@@ -98,9 +99,12 @@ sequenceDiagram
     end
 ```
 
-The seven wire messages, in order, are `challenge_request`, `attestation_response`,
+The seven broker wire messages, in order, are `challenge_request`, `attestation_response`,
 `authorization_request`, `authorization_decision`, `lease_issuance`, `lease_consume`, and
-`lease_consume_response`. Recovery adds `lease_consumption_query` and
+`lease_consume_response`. The protected local launcher session additionally carries
+`authorization_decision_admission`: a Core-authored acknowledgement that binds the exact verified
+signed decision before the launcher journals relay evidence. It is integrity evidence, not a
+second authority decision and not a lease. Recovery adds `lease_consumption_query` and
 `lease_consumption_status`. Ota may execute the governed work unit only after it verifies a signed
 `lease_consume_response` bound to the pending crossing transaction. Recovery never resumes that
 old work unit: it reconciles the broker result, finalizes the abandoned local transaction as

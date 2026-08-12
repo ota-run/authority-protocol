@@ -26,6 +26,12 @@
 
 ## Unreleased
 
+- Add the execution-disabled authorization-decision relay envelope. Core acknowledges one exact
+  verified signed decision through `authorization_decision_admission`; the launcher binds that
+  acknowledgement and signed decision in `AuthorizationDecisionRelayEvidenceV1`. Add the distinct
+  `authorization_decision_verified_before_lease_boundary_removed` terminal stage. These records
+  establish protected relay and cleanup only; they are neither a lease nor execution authority.
+
 - Add `ota.authority-launcher.systemd/v3` with bounded `CAP_SYS_PTRACE` so the root launcher
   can re-observe protected job and stopped-child process truth while `ProtectProc=invisible`
   remains enforced, plus ambient `CAP_SETUID` solely for its verified non-root target-principal
