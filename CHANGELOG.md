@@ -29,9 +29,11 @@
 - Add producer-signed launcher-finalization and exact archive-attachment identities. The cleanup
   signature binds the terminal transaction and launcher record; a separate producer signature binds
   that finalization to the exact receipt-archive identity and crossing transaction. Domain-separated
-  signing requests, responses, persistence acknowledgements, and sidecar identities support durable
-  post-cleanup recovery without treating the repository as authority. Immutable PID 1 pressure and
-  consumer release pinning remain required before this protocol is shipped.
+  signing requests, responses, recovery requests, persistence acknowledgements, and sidecar
+  identities support durable post-cleanup recovery without treating the repository as authority.
+  Completion binds the immutable receipt-archive identity, and the response may identify the
+  launcher-published sidecar without exposing archive bytes to the job principal. Immutable PID 1
+  pressure and consumer release pinning remain required before this protocol is shipped.
 
 - Add the protected systemd selected-execution completion and finalization protocol. Core reports
   one identity-bound terminal crossing transaction and receipt outcome; the launcher persists that

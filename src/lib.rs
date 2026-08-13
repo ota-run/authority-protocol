@@ -81,6 +81,7 @@ pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_REQUEST: &str =
 pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_RESPONSE: &str =
     "launcher_finalization_archive_signing_response";
 pub const LAUNCHER_FINALIZATION_ARCHIVE_REQUEST: &str = "launcher_finalization_archive_request";
+pub const LAUNCHER_FINALIZATION_RECOVERY_REQUEST: &str = "launcher_finalization_recovery_request";
 pub const LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE: &str = "launcher_finalization_archive_response";
 pub const LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE: &str =
     "launcher_finalization_archive_persistence";
@@ -147,6 +148,8 @@ pub const SIGNED_LAUNCHER_EXECUTION_FINALIZATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.signed-execution-finalization.v1\0";
 pub const LAUNCHER_FINALIZATION_ARCHIVE_SIDECAR_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.finalization-archive-sidecar.v1\0";
+pub const LAUNCHER_FINALIZATION_RECOVERY_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-recovery-request.v1\0";
 pub const LAUNCHER_FINALIZATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.finalization-signing-request.v1\0";
 pub const LAUNCHER_FINALIZATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
@@ -345,6 +348,8 @@ pub struct LauncherExecutionCompletionV1 {
     pub crossing_transaction_id: String,
     pub pending_crossing_transaction_identity: String,
     pub crossing_transaction_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_archive_identity: Option<String>,
     pub outcome: LauncherExecutionOutcomeV1,
     pub exit_code: Option<i32>,
     pub receipt_status: String,
@@ -486,6 +491,17 @@ pub struct LauncherFinalizationArchiveRequestV1 {
     pub signed_finalization_identity: Option<String>,
 }
 
+/// Reconnect request for retained finalization state before the client has the signed completion.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationRecoveryRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub authority_id: String,
+    pub launcher_request_identity: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct LauncherFinalizationArchiveResponseV1 {
@@ -494,6 +510,8 @@ pub struct LauncherFinalizationArchiveResponseV1 {
     pub response_identity: String,
     pub request_identity: String,
     pub invocation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar_file_name: Option<String>,
     pub sidecar: LauncherFinalizationArchiveSidecarV1,
 }
 
@@ -1579,6 +1597,10 @@ pub fn launcher_execution_completion_v1_identity(
         )
         || !is_sha256_identity(&completion.pending_crossing_transaction_identity)
         || !is_sha256_identity(&completion.crossing_transaction_identity)
+        || completion
+            .receipt_archive_identity
+            .as_deref()
+            .is_some_and(|identity| !is_sha256_identity(identity))
         || completion.receipt_status.is_empty()
         || completion.receipt_status.len() > 256
         || completion
@@ -1706,6 +1728,13 @@ pub fn launcher_finalization_archive_sidecar_v1_identity(
                 .finalization
                 .completion
                 .crossing_transaction_identity
+        || sidecar
+            .signed_finalization
+            .finalization
+            .completion
+            .receipt_archive_identity
+            .as_deref()
+            .is_some_and(|identity| identity != sidecar.signed_archive.receipt_archive_identity)
         || sidecar.signed_archive.producer_binding_identity
             != sidecar.signed_finalization.producer_binding_identity
     {
@@ -1852,6 +1881,13 @@ pub fn launcher_finalization_archive_signing_request_v1_identity(
                 .finalization
                 .completion
                 .crossing_transaction_identity
+        || request
+            .signed_finalization
+            .finalization
+            .completion
+            .receipt_archive_identity
+            .as_deref()
+            .is_some_and(|identity| identity != request.receipt_archive_identity)
         || request.producer_binding_identity
             != request.signed_finalization.producer_binding_identity
     {
@@ -1908,6 +1944,24 @@ pub fn launcher_finalization_archive_request_v1_identity(
     )
 }
 
+pub fn launcher_finalization_recovery_request_v1_identity(
+    request: &LauncherFinalizationRecoveryRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != LAUNCHER_FINALIZATION_RECOVERY_REQUEST
+        || !is_bounded_label(&request.authority_id, MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1)
+        || !is_sha256_identity(&request.launcher_request_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.request_identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_RECOVERY_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
 pub fn launcher_finalization_archive_response_v1_identity(
     response: &LauncherFinalizationArchiveResponseV1,
 ) -> Result<String, ProtocolError> {
@@ -1915,6 +1969,14 @@ pub fn launcher_finalization_archive_response_v1_identity(
         || response.message_kind != LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE
         || !is_sha256_identity(&response.request_identity)
         || !is_bounded_label(&response.invocation_id, MAX_LAUNCHER_INVOCATION_ID_BYTES_V1)
+        || response.sidecar_file_name.as_deref().is_some_and(|name| {
+            name.is_empty()
+                || name.len() > 255
+                || name.contains('/')
+                || name.contains('\\')
+                || name.bytes().any(|byte| byte.is_ascii_control())
+                || !name.ends_with(".launcher-finalization")
+        })
         || launcher_finalization_archive_sidecar_v1_identity(&response.sidecar)?
             != response.sidecar.identity
     {
@@ -3388,6 +3450,7 @@ mod tests {
             crossing_transaction_id: "crossing-123".into(),
             pending_crossing_transaction_identity: identity('8'),
             crossing_transaction_identity: identity('3'),
+            receipt_archive_identity: Some(identity('9')),
             outcome: LauncherExecutionOutcomeV1::Completed,
             exit_code: Some(0),
             receipt_status: "recorded".into(),
@@ -3527,11 +3590,8 @@ mod tests {
         substituted_archive.signed_archive.identity =
             signed_launcher_finalization_archive_v1_identity(&substituted_archive.signed_archive)
                 .expect("substituted signed archive identity");
-        assert_ne!(
-            launcher_finalization_archive_sidecar_v1_identity(&substituted_archive)
-                .expect("substituted archive identity"),
-            sidecar.identity
-        );
+        launcher_finalization_archive_sidecar_v1_identity(&substituted_archive)
+            .expect_err("archive identity substitution must contradict signed completion");
 
         let mut archive_request = LauncherFinalizationArchiveRequestV1 {
             schema_version: 1,
@@ -3546,12 +3606,36 @@ mod tests {
         archive_request.request_identity =
             launcher_finalization_archive_request_v1_identity(&archive_request)
                 .expect("archive request identity");
+        let mut recovery_request = LauncherFinalizationRecoveryRequestV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_FINALIZATION_RECOVERY_REQUEST.into(),
+            request_identity: String::new(),
+            authority_id: archive_request.authority_id.clone(),
+            launcher_request_identity: archive_request.launcher_request_identity.clone(),
+        };
+        recovery_request.request_identity =
+            launcher_finalization_recovery_request_v1_identity(&recovery_request)
+                .expect("recovery request identity");
+        assert_eq!(
+            launcher_finalization_recovery_request_v1_identity(&recovery_request)
+                .expect("stable recovery request identity"),
+            recovery_request.request_identity
+        );
+        let mut substituted_recovery = recovery_request;
+        substituted_recovery.launcher_request_identity = identity('b');
+        assert_ne!(
+            launcher_finalization_recovery_request_v1_identity(&substituted_recovery)
+                .expect("substituted recovery request identity"),
+            substituted_recovery.request_identity
+        );
+
         let mut archive_response = LauncherFinalizationArchiveResponseV1 {
             schema_version: 1,
             message_kind: LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE.into(),
             response_identity: String::new(),
             request_identity: archive_request.request_identity.clone(),
             invocation_id: finalization.completion.invocation_id.clone(),
+            sidecar_file_name: Some(String::from("repo-receipt-20260813.launcher-finalization")),
             sidecar: sidecar.clone(),
         };
         archive_response.response_identity =
@@ -3933,6 +4017,10 @@ mod tests {
         assert_eq!(
             LAUNCHER_ATTESTATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1,
             b"ota.authority-launcher.attestation-signing-response.v1\0"
+        );
+        assert_eq!(
+            LAUNCHER_FINALIZATION_RECOVERY_REQUEST_IDENTITY_DOMAIN_V1,
+            b"ota.authority-launcher.finalization-recovery-request.v1\0"
         );
         assert_eq!(
             [
