@@ -87,6 +87,7 @@ pub const LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE: &str =
     "launcher_finalization_archive_persistence";
 pub const LAUNCHER_OUTPUT: &str = "launcher_output";
 pub const LAUNCHER_TERMINAL: &str = "launcher_terminal";
+pub const LAUNCHER_TERMINAL_PERSISTENCE: &str = "launcher_terminal_persistence";
 pub const LAUNCHER_EXECUTION_COMPLETION: &str = "launcher_execution_completion";
 pub const LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE: &str =
     "launcher_execution_completion_persistence";
@@ -166,6 +167,10 @@ pub const LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.finalization-archive-response.v1\0";
 pub const LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.finalization-archive-persistence.v1\0";
+pub const LAUNCHER_TERMINAL_FRAME_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.terminal-frame.v1\0";
+pub const LAUNCHER_TERMINAL_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.terminal-persistence.v1\0";
 pub const LAUNCHER_EXECUTION_FINALIZATION_SIGNATURE_DOMAIN_V1: &str =
     "ota-authority-launcher/execution-finalization/v1";
 pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNATURE_DOMAIN_V1: &str =
@@ -539,6 +544,18 @@ pub struct LauncherTerminalFrameV1 {
     pub stage: Option<LauncherTerminalStageV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finalization: Option<LauncherExecutionFinalizationV1>,
+}
+
+/// Client acknowledgement that the exact terminal frame was received. Selected execution keeps
+/// its protected finalization journal until this identity-bound acknowledgement is durable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherTerminalPersistenceV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub invocation_id: String,
+    pub terminal_identity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2008,6 +2025,31 @@ pub fn launcher_finalization_archive_persistence_v1_identity(
     )
 }
 
+pub fn launcher_terminal_frame_v1_identity(
+    terminal: &LauncherTerminalFrameV1,
+) -> Result<String, ProtocolError> {
+    validate_launcher_terminal_frame_v1(terminal)?;
+    message_identity(LAUNCHER_TERMINAL_FRAME_IDENTITY_DOMAIN_V1, terminal)
+}
+
+pub fn launcher_terminal_persistence_v1_identity(
+    persistence: &LauncherTerminalPersistenceV1,
+) -> Result<String, ProtocolError> {
+    if persistence.schema_version != 1
+        || persistence.message_kind != LAUNCHER_TERMINAL_PERSISTENCE
+        || !is_bounded_label(
+            persistence.invocation_id.as_str(),
+            MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
+        )
+        || !is_sha256_identity(&persistence.terminal_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = persistence.clone();
+    canonical.identity.clear();
+    message_identity(LAUNCHER_TERMINAL_PERSISTENCE_IDENTITY_DOMAIN_V1, &canonical)
+}
+
 pub fn validate_launcher_output_frame_v1(
     frame: &LauncherOutputFrameV1,
 ) -> Result<(), ProtocolError> {
@@ -3359,6 +3401,30 @@ mod tests {
             finalization: None,
         };
         assert_eq!(validate_launcher_terminal_frame_v1(&complete), Ok(()));
+        let terminal_identity =
+            launcher_terminal_frame_v1_identity(&complete).expect("terminal identity");
+        let mut terminal_persistence = LauncherTerminalPersistenceV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_TERMINAL_PERSISTENCE.into(),
+            identity: String::new(),
+            invocation_id: complete.invocation_id.clone(),
+            terminal_identity: terminal_identity.clone(),
+        };
+        terminal_persistence.identity =
+            launcher_terminal_persistence_v1_identity(&terminal_persistence)
+                .expect("terminal persistence identity");
+        assert_eq!(
+            launcher_terminal_persistence_v1_identity(&terminal_persistence)
+                .expect("stable terminal persistence identity"),
+            terminal_persistence.identity
+        );
+        let mut substituted_persistence = terminal_persistence;
+        substituted_persistence.terminal_identity = format!("sha256:{}", "f".repeat(64));
+        assert_ne!(
+            launcher_terminal_persistence_v1_identity(&substituted_persistence)
+                .expect("substituted terminal persistence identity"),
+            substituted_persistence.identity
+        );
 
         let mut contradictory = complete;
         contradictory.exit_code = Some(1);

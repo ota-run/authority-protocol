@@ -124,7 +124,9 @@ with `launcher_execution_completion_persistence`. After Core exits, the launcher
 child, removes the exact scope and cgroup, removes the active slot, and emits one
 `LauncherExecutionFinalizationV1` inside the outer terminal frame. Completion is not cleanup
 evidence; finalization is valid only when all four removal checks are true and the observed child
-exit matches the Core-authored completion.
+exit matches Core's completion. Selected execution additionally uses an identity-bound terminal
+persistence acknowledgement; the launcher must retain and replay the exact terminal until that
+acknowledgement is received.
 
 ## Runtime-boundary attestation
 

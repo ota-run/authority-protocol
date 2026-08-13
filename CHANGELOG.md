@@ -32,8 +32,10 @@
   signing requests, responses, recovery requests, persistence acknowledgements, and sidecar
   identities support durable post-cleanup recovery without treating the repository as authority.
   Completion binds the immutable receipt-archive identity, and the response may identify the
-  launcher-published sidecar without exposing archive bytes to the job principal. Immutable PID 1
-  pressure and consumer release pinning remain required before this protocol is shipped.
+  launcher-published sidecar without exposing archive bytes to the job principal. Add a separate
+  identity-bound terminal persistence acknowledgement so the launcher can retain and replay the
+  exact terminal until delivery is confirmed. Immutable PID 1 pressure and consumer release
+  pinning remain required before this protocol is shipped.
 
 - Add the protected systemd selected-execution completion and finalization protocol. Core reports
   one identity-bound terminal crossing transaction and receipt outcome; the launcher persists that
