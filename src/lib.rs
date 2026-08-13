@@ -2651,7 +2651,8 @@ pub fn systemd_launcher_profile_v3() -> SystemdLauncherProfileDefinitionV1 {
         .iter_mut()
         .find(|setting| setting.name == "CapabilityBoundingSet")
         .expect("canonical systemd launcher profile carries a capability boundary");
-    capability_bounding_set.value = "CAP_SETUID CAP_SETGID CAP_KILL CAP_SYS_PTRACE".into();
+    capability_bounding_set.value =
+        "CAP_SETUID CAP_SETGID CAP_KILL CAP_SYS_PTRACE CAP_DAC_OVERRIDE".into();
     let read_only_paths = profile
         .service_settings
         .iter_mut()
@@ -4225,7 +4226,7 @@ mod tests {
         );
         assert!(process_inspection.service_settings.iter().any(|setting| {
             setting.name == "CapabilityBoundingSet"
-                && setting.value == "CAP_SETUID CAP_SETGID CAP_KILL CAP_SYS_PTRACE"
+                && setting.value == "CAP_SETUID CAP_SETGID CAP_KILL CAP_SYS_PTRACE CAP_DAC_OVERRIDE"
         }));
         assert_eq!(
             systemd_launcher_profile_by_id(SYSTEMD_LAUNCHER_PROFILE_ID_V3),
@@ -4267,7 +4268,7 @@ mod tests {
         assert_eq!(
             systemd_launcher_profile_identity(&process_inspection)
                 .expect("process-inspection profile identity"),
-            "sha256:b5853a12e72c4ca32b0f93a38bc8f1097c7809039b58449f67fcf9019d0ea480"
+            "sha256:1d0ef44c24b6ec21dc0c462edd52c5197ae35a4a1728a98cd93b92d6f106dfaf"
         );
         assert_eq!(
             principal_identity,
@@ -4708,15 +4709,15 @@ mod tests {
                 .expect("signing response identity");
         assert_eq!(
             signing_response.claims_identity,
-            "sha256:9e5521101f6488c2d220a3e81401482e9b945a5570c73e47910692065ed9c608"
+            "sha256:740faa5f715d14be3d5230de93d94523cd7a7ed51d2f75bf73ee61998e1ccd9e"
         );
         assert_eq!(
             signing_request.request_identity,
-            "sha256:735ea187d4e57e79aa4a3c0ec87814497956e3c78dbe572b1f3a304ca4be837a"
+            "sha256:d6031f445681de60286a7ff507222732af69d933d9be9a268dbe35a0df12bdb2"
         );
         assert_eq!(
             signing_response.response_identity,
-            "sha256:ee59cbf5b3d6fb5eb82b4cd53212eca6eb3e2249dd24eb69adde00c8acfaf576"
+            "sha256:bee2218cf17d8e26d3306389fe15efbb5151c93d25858a1a72d94fb1b39eff4d"
         );
         validate_launcher_attestation_signing_response_v1(&signing_response)
             .expect("valid signing response");
