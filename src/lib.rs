@@ -339,6 +339,14 @@ pub enum LauncherExecutionOutcomeV1 {
     Interrupted,
 }
 
+/// How the launcher established the child-exit portion of terminal cleanup evidence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherChildExitPostureV1 {
+    LauncherObservedAndReaped,
+    RecoveredAbsentCompletionBound,
+}
+
 /// Core-authored selected-work result. This is persisted before the protected child exits, but it
 /// is not launcher cleanup evidence.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -379,8 +387,12 @@ pub struct LauncherExecutionFinalizationV1 {
     pub completion: LauncherExecutionCompletionV1,
     pub child_identity: String,
     pub scope_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_exit_posture: Option<LauncherChildExitPostureV1>,
     pub observed_exit_code: Option<i32>,
     pub child_reaped: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_absent: Option<bool>,
     pub scope_removed: bool,
     pub cgroup_empty_or_absent: bool,
     pub active_slot_removed: bool,
@@ -1653,18 +1665,46 @@ pub fn launcher_execution_completion_persistence_v1_identity(
 pub fn launcher_execution_finalization_v1_identity(
     finalization: &LauncherExecutionFinalizationV1,
 ) -> Result<String, ProtocolError> {
-    if finalization.schema_version != 1
-        || launcher_execution_completion_v1_identity(&finalization.completion)?
-            != finalization.completion.identity
+    if launcher_execution_completion_v1_identity(&finalization.completion)?
+        != finalization.completion.identity
         || !is_sha256_identity(&finalization.child_identity)
         || !is_sha256_identity(&finalization.scope_identity)
-        || finalization.observed_exit_code != finalization.completion.exit_code
-        || !finalization.child_reaped
         || !finalization.scope_removed
         || !finalization.cgroup_empty_or_absent
         || !finalization.active_slot_removed
     {
         return Err(ProtocolError::InvalidRecord);
+    }
+    match finalization.schema_version {
+        1 => {
+            if finalization.child_exit_posture.is_some()
+                || finalization.child_absent.is_some()
+                || finalization.observed_exit_code != finalization.completion.exit_code
+                || !finalization.child_reaped
+            {
+                return Err(ProtocolError::InvalidRecord);
+            }
+        }
+        2 => match finalization.child_exit_posture {
+            Some(LauncherChildExitPostureV1::LauncherObservedAndReaped) => {
+                if finalization.observed_exit_code != finalization.completion.exit_code
+                    || !finalization.child_reaped
+                    || finalization.child_absent != Some(true)
+                {
+                    return Err(ProtocolError::InvalidRecord);
+                }
+            }
+            Some(LauncherChildExitPostureV1::RecoveredAbsentCompletionBound) => {
+                if finalization.observed_exit_code.is_some()
+                    || finalization.child_reaped
+                    || finalization.child_absent != Some(true)
+                {
+                    return Err(ProtocolError::InvalidRecord);
+                }
+            }
+            None => return Err(ProtocolError::InvalidRecord),
+        },
+        _ => return Err(ProtocolError::InvalidRecord),
     }
     let mut canonical = finalization.clone();
     canonical.identity.clear();
@@ -3545,8 +3585,10 @@ mod tests {
             completion,
             child_identity: identity('4'),
             scope_identity: identity('5'),
+            child_exit_posture: None,
             observed_exit_code: Some(0),
             child_reaped: true,
+            child_absent: None,
             scope_removed: true,
             cgroup_empty_or_absent: true,
             active_slot_removed: true,
@@ -3563,6 +3605,32 @@ mod tests {
             finalization: Some(finalization.clone()),
         };
         assert_eq!(validate_launcher_terminal_frame_v1(&terminal), Ok(()));
+
+        let mut recovered = finalization.clone();
+        recovered.schema_version = 2;
+        recovered.child_exit_posture =
+            Some(LauncherChildExitPostureV1::RecoveredAbsentCompletionBound);
+        recovered.observed_exit_code = None;
+        recovered.child_reaped = false;
+        recovered.child_absent = Some(true);
+        recovered.identity = launcher_execution_finalization_v1_identity(&recovered)
+            .expect("recovered finalization identity");
+        let recovered_terminal = LauncherTerminalFrameV1 {
+            exit_code: Some(0),
+            finalization: Some(recovered.clone()),
+            ..terminal.clone()
+        };
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&recovered_terminal),
+            Ok(())
+        );
+
+        let mut dishonest_recovery = recovered;
+        dishonest_recovery.child_reaped = true;
+        assert_eq!(
+            launcher_execution_finalization_v1_identity(&dishonest_recovery),
+            Err(ProtocolError::InvalidRecord)
+        );
 
         let mut interrupted = finalization.clone();
         interrupted.completion.outcome = LauncherExecutionOutcomeV1::Interrupted;

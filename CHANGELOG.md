@@ -26,6 +26,11 @@
 
 ## Unreleased
 
+- Version launcher execution finalization so restart recovery cannot invent child-exit evidence.
+  Live schema-v1 evidence retains the launcher-observed exit and reaping claim. Schema v2 instead
+  records `recovered_absent_completion_bound`, requires exact child absence, and forbids both an
+  observed exit code and a child-reaped claim while remaining bound to Core's durable completion.
+
 - Add producer-signed launcher-finalization and exact archive-attachment identities. The cleanup
   signature binds the terminal transaction and launcher record; a separate producer signature binds
   that finalization to the exact receipt-archive identity and crossing transaction. Domain-separated

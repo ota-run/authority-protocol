@@ -123,8 +123,11 @@ work unit, and consumed-lease admission. The launcher durably journals that reco
 with `launcher_execution_completion_persistence`. After Core exits, the launcher reaps the exact
 child, removes the exact scope and cgroup, removes the active slot, and emits one
 `LauncherExecutionFinalizationV1` inside the outer terminal frame. Completion is not cleanup
-evidence; finalization is valid only when all four removal checks are true and the observed child
-exit matches Core's completion. Selected execution additionally uses an identity-bound terminal
+evidence. A live finalization is valid only when all four removal checks are true and the launcher-
+observed child exit matches Core's completion. Schema v2 can instead record
+`recovered_absent_completion_bound` after a launcher restart: it binds verified child absence to
+Core's durable completion while explicitly carrying no observed exit code and no child-reaped
+claim. Selected execution additionally uses an identity-bound terminal
 persistence acknowledgement; the launcher must retain and replay the exact terminal until that
 acknowledgement is received.
 
