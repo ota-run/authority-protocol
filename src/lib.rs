@@ -74,11 +74,22 @@ pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
 pub const LAUNCHER_STARTUP_CONTINUATION: &str = "launcher_startup_continuation";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST: &str = "launcher_attestation_signing_request";
 pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE: &str = "launcher_attestation_signing_response";
+pub const LAUNCHER_FINALIZATION_SIGNING_REQUEST: &str = "launcher_finalization_signing_request";
+pub const LAUNCHER_FINALIZATION_SIGNING_RESPONSE: &str = "launcher_finalization_signing_response";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_REQUEST: &str =
+    "launcher_finalization_archive_signing_request";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_RESPONSE: &str =
+    "launcher_finalization_archive_signing_response";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_REQUEST: &str = "launcher_finalization_archive_request";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE: &str = "launcher_finalization_archive_response";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE: &str =
+    "launcher_finalization_archive_persistence";
 pub const LAUNCHER_OUTPUT: &str = "launcher_output";
 pub const LAUNCHER_TERMINAL: &str = "launcher_terminal";
 pub const LAUNCHER_EXECUTION_COMPLETION: &str = "launcher_execution_completion";
 pub const LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE: &str =
     "launcher_execution_completion_persistence";
+pub const LAUNCHER_SIGNED_EXECUTION_FINALIZATION: &str = "launcher_signed_execution_finalization";
 
 pub const CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.challenge.v1\0";
 pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.v1\0";
@@ -132,6 +143,30 @@ pub const LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.execution-completion-persistence.v1\0";
 pub const LAUNCHER_EXECUTION_FINALIZATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.execution-finalization.v1\0";
+pub const SIGNED_LAUNCHER_EXECUTION_FINALIZATION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.signed-execution-finalization.v1\0";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_SIDECAR_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-archive-sidecar.v1\0";
+pub const LAUNCHER_FINALIZATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-signing-request.v1\0";
+pub const LAUNCHER_FINALIZATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-signing-response.v1\0";
+pub const SIGNED_LAUNCHER_FINALIZATION_ARCHIVE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.signed-finalization-archive.v1\0";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-archive-signing-request.v1\0";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-archive-signing-response.v1\0";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-archive-request.v1\0";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-archive-response.v1\0";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.finalization-archive-persistence.v1\0";
+pub const LAUNCHER_EXECUTION_FINALIZATION_SIGNATURE_DOMAIN_V1: &str =
+    "ota-authority-launcher/execution-finalization/v1";
+pub const LAUNCHER_FINALIZATION_ARCHIVE_SIGNATURE_DOMAIN_V1: &str =
+    "ota-authority-launcher/finalization-archive/v1";
 pub const LAUNCHER_ATTESTATION_CLAIMS_IDENTITY_DOMAIN_V3: &[u8] =
     b"ota.authority-launcher.attestation-claims.v3\0";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
@@ -339,6 +374,137 @@ pub struct LauncherExecutionFinalizationV1 {
     pub scope_removed: bool,
     pub cgroup_empty_or_absent: bool,
     pub active_slot_removed: bool,
+}
+
+/// Portable producer-signed form of launcher cleanup evidence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedLauncherExecutionFinalizationV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub finalization: LauncherExecutionFinalizationV1,
+    pub producer_binding_identity: String,
+    pub issued_at: String,
+    pub key_id: String,
+    pub algorithm: String,
+    pub signature: String,
+}
+
+/// Producer-signed binding between exact cleanup evidence and one immutable Ota receipt archive.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedLauncherFinalizationArchiveV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub signed_finalization_identity: String,
+    pub receipt_archive_identity: String,
+    pub crossing_transaction_identity: String,
+    pub producer_binding_identity: String,
+    pub issued_at: String,
+    pub key_id: String,
+    pub algorithm: String,
+    pub signature: String,
+}
+
+/// Detached producer-authenticated carrier attached beside an immutable Ota receipt archive.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationArchiveSidecarV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub signed_finalization: SignedLauncherExecutionFinalizationV1,
+    pub signed_archive: SignedLauncherFinalizationArchiveV1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherSignedExecutionFinalizationFrameV1 {
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub invocation_id: String,
+    pub signed_finalization: SignedLauncherExecutionFinalizationV1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationSigningRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub finalization: LauncherExecutionFinalizationV1,
+    pub producer_binding_identity: String,
+    pub launcher_service_binding_identity: String,
+    pub launcher_configuration_identity: String,
+    pub launcher_executable_identity: String,
+    pub launcher_profile_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationSigningResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub signed_finalization: SignedLauncherExecutionFinalizationV1,
+    pub response_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationArchiveSigningRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub signed_finalization: SignedLauncherExecutionFinalizationV1,
+    pub receipt_archive_identity: String,
+    pub crossing_transaction_identity: String,
+    pub producer_binding_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationArchiveSigningResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub signed_archive: SignedLauncherFinalizationArchiveV1,
+    pub response_identity: String,
+}
+
+/// Client request to bind one exact receipt archive to retained launcher cleanup evidence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationArchiveRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub authority_id: String,
+    pub launcher_request_identity: String,
+    pub receipt_archive_identity: String,
+    pub crossing_transaction_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_finalization_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationArchiveResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub response_identity: String,
+    pub request_identity: String,
+    pub invocation_id: String,
+    pub sidecar: LauncherFinalizationArchiveSidecarV1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherFinalizationArchivePersistenceV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub sidecar_identity: String,
 }
 
 /// The sole terminal frame for one launcher invocation. A client must not treat any output frame
@@ -1465,6 +1631,317 @@ pub fn launcher_execution_finalization_v1_identity(
     canonical.identity.clear();
     message_identity(
         LAUNCHER_EXECUTION_FINALIZATION_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+#[derive(Serialize)]
+struct LauncherExecutionFinalizationSignaturePayloadV1<'a> {
+    finalization: &'a LauncherExecutionFinalizationV1,
+    producer_binding_identity: &'a str,
+    issued_at: &'a str,
+}
+
+pub fn launcher_execution_finalization_signature_bytes_v1(
+    finalization: &LauncherExecutionFinalizationV1,
+    producer_binding_identity: &str,
+    issued_at: &str,
+) -> Result<Vec<u8>, ProtocolError> {
+    if launcher_execution_finalization_v1_identity(finalization)? != finalization.identity
+        || !is_sha256_identity(producer_binding_identity)
+        || issued_at.is_empty()
+        || issued_at.len() > 64
+        || issued_at.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let canonical = serde_jcs::to_vec(&LauncherExecutionFinalizationSignaturePayloadV1 {
+        finalization,
+        producer_binding_identity,
+        issued_at,
+    })
+    .map_err(|_| ProtocolError::InvalidRecord)?;
+    Ok(domain_separated(
+        LAUNCHER_EXECUTION_FINALIZATION_SIGNATURE_DOMAIN_V1.as_bytes(),
+        &canonical,
+    ))
+}
+
+pub fn signed_launcher_execution_finalization_v1_identity(
+    signed: &SignedLauncherExecutionFinalizationV1,
+) -> Result<String, ProtocolError> {
+    launcher_execution_finalization_signature_bytes_v1(
+        &signed.finalization,
+        &signed.producer_binding_identity,
+        &signed.issued_at,
+    )?;
+    if signed.schema_version != 1
+        || !is_bounded_label(&signed.key_id, 128)
+        || signed.algorithm != "ed25519"
+        || !is_bounded_label(&signed.signature, 256)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = signed.clone();
+    canonical.identity.clear();
+    message_identity(
+        SIGNED_LAUNCHER_EXECUTION_FINALIZATION_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_finalization_archive_sidecar_v1_identity(
+    sidecar: &LauncherFinalizationArchiveSidecarV1,
+) -> Result<String, ProtocolError> {
+    if sidecar.schema_version != 1
+        || signed_launcher_execution_finalization_v1_identity(&sidecar.signed_finalization)?
+            != sidecar.signed_finalization.identity
+        || signed_launcher_finalization_archive_v1_identity(&sidecar.signed_archive)?
+            != sidecar.signed_archive.identity
+        || sidecar.signed_archive.signed_finalization_identity
+            != sidecar.signed_finalization.identity
+        || sidecar.signed_archive.crossing_transaction_identity
+            != sidecar
+                .signed_finalization
+                .finalization
+                .completion
+                .crossing_transaction_identity
+        || sidecar.signed_archive.producer_binding_identity
+            != sidecar.signed_finalization.producer_binding_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = sidecar.clone();
+    canonical.identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_ARCHIVE_SIDECAR_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+#[derive(Serialize)]
+struct LauncherFinalizationArchiveSignaturePayloadV1<'a> {
+    signed_finalization_identity: &'a str,
+    receipt_archive_identity: &'a str,
+    crossing_transaction_identity: &'a str,
+    producer_binding_identity: &'a str,
+    issued_at: &'a str,
+}
+
+pub fn launcher_finalization_archive_signature_bytes_v1(
+    signed_archive: &SignedLauncherFinalizationArchiveV1,
+) -> Result<Vec<u8>, ProtocolError> {
+    if !is_sha256_identity(&signed_archive.signed_finalization_identity)
+        || !is_sha256_identity(&signed_archive.receipt_archive_identity)
+        || !is_sha256_identity(&signed_archive.crossing_transaction_identity)
+        || !is_sha256_identity(&signed_archive.producer_binding_identity)
+        || signed_archive.issued_at.is_empty()
+        || signed_archive.issued_at.len() > 64
+        || signed_archive
+            .issued_at
+            .bytes()
+            .any(|byte| byte.is_ascii_control())
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let canonical = serde_jcs::to_vec(&LauncherFinalizationArchiveSignaturePayloadV1 {
+        signed_finalization_identity: &signed_archive.signed_finalization_identity,
+        receipt_archive_identity: &signed_archive.receipt_archive_identity,
+        crossing_transaction_identity: &signed_archive.crossing_transaction_identity,
+        producer_binding_identity: &signed_archive.producer_binding_identity,
+        issued_at: &signed_archive.issued_at,
+    })
+    .map_err(|_| ProtocolError::InvalidRecord)?;
+    Ok(domain_separated(
+        LAUNCHER_FINALIZATION_ARCHIVE_SIGNATURE_DOMAIN_V1.as_bytes(),
+        &canonical,
+    ))
+}
+
+pub fn signed_launcher_finalization_archive_v1_identity(
+    signed_archive: &SignedLauncherFinalizationArchiveV1,
+) -> Result<String, ProtocolError> {
+    launcher_finalization_archive_signature_bytes_v1(signed_archive)?;
+    if signed_archive.schema_version != 1
+        || !is_bounded_label(&signed_archive.key_id, 128)
+        || signed_archive.algorithm != "ed25519"
+        || !is_bounded_label(&signed_archive.signature, 256)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = signed_archive.clone();
+    canonical.identity.clear();
+    message_identity(
+        SIGNED_LAUNCHER_FINALIZATION_ARCHIVE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_launcher_signed_execution_finalization_frame_v1(
+    frame: &LauncherSignedExecutionFinalizationFrameV1,
+) -> Result<(), ProtocolError> {
+    if frame.message_kind != LAUNCHER_SIGNED_EXECUTION_FINALIZATION
+        || frame.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || frame.invocation_id
+            != frame
+                .signed_finalization
+                .finalization
+                .completion
+                .invocation_id
+        || signed_launcher_execution_finalization_v1_identity(&frame.signed_finalization)?
+            != frame.signed_finalization.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn launcher_finalization_signing_request_v1_identity(
+    request: &LauncherFinalizationSigningRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != LAUNCHER_FINALIZATION_SIGNING_REQUEST
+        || launcher_execution_finalization_v1_identity(&request.finalization)?
+            != request.finalization.identity
+        || !is_sha256_identity(&request.producer_binding_identity)
+        || !is_sha256_identity(&request.launcher_service_binding_identity)
+        || !is_sha256_identity(&request.launcher_configuration_identity)
+        || !is_sha256_identity(&request.launcher_executable_identity)
+        || !is_sha256_identity(&request.launcher_profile_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.request_identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_finalization_signing_response_v1_identity(
+    response: &LauncherFinalizationSigningResponseV1,
+) -> Result<String, ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != LAUNCHER_FINALIZATION_SIGNING_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+        || signed_launcher_execution_finalization_v1_identity(&response.signed_finalization)?
+            != response.signed_finalization.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = response.clone();
+    canonical.response_identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_finalization_archive_signing_request_v1_identity(
+    request: &LauncherFinalizationArchiveSigningRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_REQUEST
+        || signed_launcher_execution_finalization_v1_identity(&request.signed_finalization)?
+            != request.signed_finalization.identity
+        || !is_sha256_identity(&request.receipt_archive_identity)
+        || request.crossing_transaction_identity
+            != request
+                .signed_finalization
+                .finalization
+                .completion
+                .crossing_transaction_identity
+        || request.producer_binding_identity
+            != request.signed_finalization.producer_binding_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.request_identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_finalization_archive_signing_response_v1_identity(
+    response: &LauncherFinalizationArchiveSigningResponseV1,
+) -> Result<String, ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+        || signed_launcher_finalization_archive_v1_identity(&response.signed_archive)?
+            != response.signed_archive.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = response.clone();
+    canonical.response_identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_ARCHIVE_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_finalization_archive_request_v1_identity(
+    request: &LauncherFinalizationArchiveRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != LAUNCHER_FINALIZATION_ARCHIVE_REQUEST
+        || !is_bounded_label(&request.authority_id, MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1)
+        || !is_sha256_identity(&request.launcher_request_identity)
+        || !is_sha256_identity(&request.receipt_archive_identity)
+        || !is_sha256_identity(&request.crossing_transaction_identity)
+        || request
+            .signed_finalization_identity
+            .as_deref()
+            .is_some_and(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.request_identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_ARCHIVE_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_finalization_archive_response_v1_identity(
+    response: &LauncherFinalizationArchiveResponseV1,
+) -> Result<String, ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+        || !is_bounded_label(&response.invocation_id, MAX_LAUNCHER_INVOCATION_ID_BYTES_V1)
+        || launcher_finalization_archive_sidecar_v1_identity(&response.sidecar)?
+            != response.sidecar.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = response.clone();
+    canonical.response_identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_finalization_archive_persistence_v1_identity(
+    persistence: &LauncherFinalizationArchivePersistenceV1,
+) -> Result<String, ProtocolError> {
+    if persistence.schema_version != 1
+        || persistence.message_kind != LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE
+        || !is_sha256_identity(&persistence.request_identity)
+        || !is_sha256_identity(&persistence.sidecar_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = persistence.clone();
+    canonical.identity.clear();
+    message_identity(
+        LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE_IDENTITY_DOMAIN_V1,
         &canonical,
     )
 }
@@ -2991,6 +3468,140 @@ mod tests {
                 .expect("substituted identity"),
             finalization.identity
         );
+
+        let mut signed = SignedLauncherExecutionFinalizationV1 {
+            schema_version: 1,
+            identity: String::new(),
+            finalization: finalization.clone(),
+            producer_binding_identity: identity('7'),
+            issued_at: String::from("2026-08-13T12:00:00Z"),
+            key_id: String::from("launcher-attestor-2026"),
+            algorithm: String::from("ed25519"),
+            signature: String::from("signed-finalization"),
+        };
+        signed.identity = signed_launcher_execution_finalization_v1_identity(&signed)
+            .expect("signed finalization identity");
+        let frame = LauncherSignedExecutionFinalizationFrameV1 {
+            message_kind: LAUNCHER_SIGNED_EXECUTION_FINALIZATION.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            invocation_id: finalization.completion.invocation_id.clone(),
+            signed_finalization: signed.clone(),
+        };
+        assert_eq!(
+            validate_launcher_signed_execution_finalization_frame_v1(&frame),
+            Ok(())
+        );
+
+        let mut signed_archive = SignedLauncherFinalizationArchiveV1 {
+            schema_version: 1,
+            identity: String::new(),
+            signed_finalization_identity: signed.identity.clone(),
+            receipt_archive_identity: identity('9'),
+            crossing_transaction_identity: finalization
+                .completion
+                .crossing_transaction_identity
+                .clone(),
+            producer_binding_identity: signed.producer_binding_identity.clone(),
+            issued_at: String::from("2026-08-13T12:00:01Z"),
+            key_id: signed.key_id.clone(),
+            algorithm: String::from("ed25519"),
+            signature: String::from("signed-archive"),
+        };
+        signed_archive.identity = signed_launcher_finalization_archive_v1_identity(&signed_archive)
+            .expect("signed archive identity");
+        let mut sidecar = LauncherFinalizationArchiveSidecarV1 {
+            schema_version: 1,
+            identity: String::new(),
+            signed_finalization: signed.clone(),
+            signed_archive: signed_archive.clone(),
+        };
+        sidecar.identity =
+            launcher_finalization_archive_sidecar_v1_identity(&sidecar).expect("sidecar identity");
+        assert_eq!(
+            launcher_finalization_archive_sidecar_v1_identity(&sidecar)
+                .expect("stable sidecar identity"),
+            sidecar.identity
+        );
+        let mut substituted_archive = sidecar.clone();
+        substituted_archive.signed_archive.receipt_archive_identity = identity('a');
+        substituted_archive.signed_archive.identity =
+            signed_launcher_finalization_archive_v1_identity(&substituted_archive.signed_archive)
+                .expect("substituted signed archive identity");
+        assert_ne!(
+            launcher_finalization_archive_sidecar_v1_identity(&substituted_archive)
+                .expect("substituted archive identity"),
+            sidecar.identity
+        );
+
+        let mut archive_request = LauncherFinalizationArchiveRequestV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_FINALIZATION_ARCHIVE_REQUEST.into(),
+            request_identity: String::new(),
+            authority_id: String::from("authority-1"),
+            launcher_request_identity: identity('a'),
+            receipt_archive_identity: signed_archive.receipt_archive_identity.clone(),
+            crossing_transaction_identity: signed_archive.crossing_transaction_identity.clone(),
+            signed_finalization_identity: Some(signed.identity.clone()),
+        };
+        archive_request.request_identity =
+            launcher_finalization_archive_request_v1_identity(&archive_request)
+                .expect("archive request identity");
+        let mut archive_response = LauncherFinalizationArchiveResponseV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_FINALIZATION_ARCHIVE_RESPONSE.into(),
+            response_identity: String::new(),
+            request_identity: archive_request.request_identity.clone(),
+            invocation_id: finalization.completion.invocation_id.clone(),
+            sidecar: sidecar.clone(),
+        };
+        archive_response.response_identity =
+            launcher_finalization_archive_response_v1_identity(&archive_response)
+                .expect("archive response identity");
+        let mut persistence = LauncherFinalizationArchivePersistenceV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_FINALIZATION_ARCHIVE_PERSISTENCE.into(),
+            identity: String::new(),
+            request_identity: archive_request.request_identity,
+            sidecar_identity: sidecar.identity,
+        };
+        persistence.identity = launcher_finalization_archive_persistence_v1_identity(&persistence)
+            .expect("archive persistence identity");
+        assert_eq!(
+            launcher_finalization_archive_persistence_v1_identity(&persistence)
+                .expect("stable archive persistence identity"),
+            persistence.identity
+        );
+
+        let mut signing_request = LauncherFinalizationSigningRequestV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_FINALIZATION_SIGNING_REQUEST.into(),
+            request_identity: String::new(),
+            finalization: finalization.clone(),
+            producer_binding_identity: signed.producer_binding_identity.clone(),
+            launcher_service_binding_identity: identity('b'),
+            launcher_configuration_identity: identity('c'),
+            launcher_executable_identity: identity('d'),
+            launcher_profile_identity: identity('e'),
+        };
+        signing_request.request_identity =
+            launcher_finalization_signing_request_v1_identity(&signing_request)
+                .expect("signing request identity");
+        let mut signing_response = LauncherFinalizationSigningResponseV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_FINALIZATION_SIGNING_RESPONSE.into(),
+            request_identity: signing_request.request_identity.clone(),
+            signed_finalization: signed,
+            response_identity: String::new(),
+        };
+        signing_response.response_identity =
+            launcher_finalization_signing_response_v1_identity(&signing_response)
+                .expect("signing response identity");
+        assert_eq!(
+            launcher_finalization_signing_response_v1_identity(&signing_response)
+                .expect("stable signing response identity"),
+            signing_response.response_identity
+        );
+
         let mut wrong_stage = terminal;
         wrong_stage.stage = Some(LauncherTerminalStageV1::SelectedExecutionFailedBoundaryRemoved);
         wrong_stage.outcome = LauncherTerminalOutcomeV1::Failed;
