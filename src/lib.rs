@@ -39,12 +39,14 @@ pub const PROTECTED_LAUNCHER_IMAGE_PROFILE_ID_V1: &str =
     "ota.runtime-boundary.protected-launcher-image/v1";
 pub const SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1: &str = "systemd_protected_launcher/v1";
 pub const SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1: &str = "ota-authority-launcher/systemd/v1";
+pub const SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1: &str = "ota-authority-history/systemd/v1";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V1: &str = "ota.authority-launcher.systemd/v1";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V2: &str = "ota.authority-launcher.systemd/v2";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V3: &str = "ota.authority-launcher.systemd/v3";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1: &str = "ota.authority-job-principal.systemd/v1";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V2: &str = "ota.authority-job-principal.systemd/v2";
 pub const SYSTEMD_ATTESTOR_SOCKET_PATH_V1: &str = "/run/ota/authority-attestor.sock";
+pub const SYSTEMD_PROTECTED_HISTORY_SOCKET_PATH_V1: &str = "/run/ota/authority-history.sock";
 pub const SYSTEMD_ATTESTOR_SERVICE_UNIT_V1: &str = "ota-authority-attestor.service";
 pub const SYSTEMD_LAUNCHER_SERVICE_UNIT_V1: &str = "ota-authority-launcher.service";
 pub const OTA_PROCESS_POSTURE: &str = "ota_process_posture";
@@ -56,6 +58,9 @@ pub const MAX_LAUNCHER_INVOCATION_ID_BYTES_V1: usize = 128;
 pub const MAX_LAUNCHER_REPOSITORY_PATH_BYTES_V1: usize = 4096;
 // JSON byte-array encoding can use up to four bytes per payload byte plus framing metadata.
 pub const MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1: usize = 15 * 1024;
+pub const MAX_HISTORY_ENTRY_COUNT_V1: usize = 256;
+pub const MAX_HISTORY_CHUNK_PAYLOAD_BYTES_V1: usize = 15 * 1024;
+pub const MAX_HISTORY_RESPONSE_BYTES_V1: u64 = 16 * 1024 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
 pub const ATTESTATION_RESPONSE: &str = "attestation_response";
@@ -92,6 +97,14 @@ pub const LAUNCHER_EXECUTION_COMPLETION: &str = "launcher_execution_completion";
 pub const LAUNCHER_EXECUTION_COMPLETION_PERSISTENCE: &str =
     "launcher_execution_completion_persistence";
 pub const LAUNCHER_SIGNED_EXECUTION_FINALIZATION: &str = "launcher_signed_execution_finalization";
+pub const LAUNCHER_HISTORY_QUERY: &str = "launcher_history_query";
+pub const LAUNCHER_HISTORY_MANIFEST: &str = "launcher_history_manifest";
+pub const LAUNCHER_HISTORY_ENTRY: &str = "launcher_history_entry";
+pub const LAUNCHER_HISTORY_OBJECT: &str = "launcher_history_object";
+pub const LAUNCHER_HISTORY_CHUNK: &str = "launcher_history_chunk";
+pub const LAUNCHER_HISTORY_PRE_QUERY_REFUSAL: &str = "launcher_history_pre_query_refusal";
+pub const LAUNCHER_HISTORY_QUERY_REFUSAL: &str = "launcher_history_query_refusal";
+pub const LAUNCHER_HISTORY_MANIFEST_TERMINAL: &str = "launcher_history_manifest_terminal";
 
 pub const CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.challenge.v1\0";
 pub const WORK_UNIT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.crossing-broker.work-unit.v1\0";
@@ -183,6 +196,22 @@ pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.attestation-signing-response.v1\0";
 pub const LAUNCHER_ATTESTATION_PRODUCER_BINDING_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.attestation-producer-binding.v1\0";
+pub const LAUNCHER_HISTORY_QUERY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-query.v1\0";
+pub const LAUNCHER_HISTORY_MANIFEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-manifest.v1\0";
+pub const LAUNCHER_HISTORY_ENTRY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-entry.v1\0";
+pub const LAUNCHER_HISTORY_OBJECT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-object.v1\0";
+pub const LAUNCHER_HISTORY_CHUNK_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-chunk.v1\0";
+pub const LAUNCHER_HISTORY_PRE_QUERY_REFUSAL_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-pre-query-refusal.v1\0";
+pub const LAUNCHER_HISTORY_QUERY_REFUSAL_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-query-refusal.v1\0";
+pub const LAUNCHER_HISTORY_MANIFEST_TERMINAL_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.history-manifest-terminal.v1\0";
 pub const CHALLENGE_REQUEST_DOMAIN_V1: &str = "ota-crossing-broker/challenge-request/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V1: &str = "ota-crossing-broker/attestation-response/v1";
 pub const ATTESTATION_RESPONSE_DOMAIN_V2: &str = "ota-crossing-broker/attestation-response/v2";
@@ -556,6 +585,163 @@ pub struct LauncherTerminalFrameV1 {
     pub stage: Option<LauncherTerminalStageV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finalization: Option<LauncherExecutionFinalizationV1>,
+}
+
+/// A bounded protected-history query. Repository, authority, and catalog selection are derived by
+/// the protected service from the connected peer and administrator-owned mapping.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryQueryV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub query_nonce: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_identity: Option<String>,
+    pub query_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryManifestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub query_identity: String,
+    pub repository_binding_identity: String,
+    pub catalog_namespace_identity: String,
+    pub operator_profile_identity: String,
+    pub operator_peer_identity: String,
+    pub operator_attribution: LauncherHistoryOperatorAttributionV1,
+    pub operator_posture: LauncherHistoryOperatorPostureV1,
+    pub catalog_entry_identities: Vec<String>,
+    pub total_selected_count: u32,
+    /// Exact sum of the selected archive, contract-snapshot, and sidecar object byte lengths.
+    pub bounded_response_bytes: u64,
+    pub catalog_snapshot_identity: String,
+    pub manifest_identity: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherHistoryOperatorAttributionV1 {
+    NonAgent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherHistoryOperatorPostureV1 {
+    LeastPrivilegeOperatorPeerVerified,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherHistoryObjectKindV1 {
+    Archive,
+    ContractSnapshot,
+    Sidecar,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryEntryV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub manifest_identity: String,
+    pub entry_ordinal: u32,
+    pub catalog_identity: String,
+    pub archive_object_identity: String,
+    pub contract_snapshot_object_identity: String,
+    pub sidecar_object_identity: String,
+    pub entry_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryObjectV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub manifest_identity: String,
+    pub entry_ordinal: u32,
+    pub catalog_identity: String,
+    pub object_kind: LauncherHistoryObjectKindV1,
+    pub content_identity: String,
+    pub byte_length: u64,
+    pub chunk_count: u32,
+    pub object_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryChunkV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub object_identity: String,
+    pub chunk_ordinal: u32,
+    pub bytes: Vec<u8>,
+    pub chunk_identity: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherHistoryRefusalReasonV1 {
+    PeerAdmissionRefused,
+    MalformedQuery,
+    UnsupportedProtocol,
+    RepositoryMappingMissing,
+    RepositoryMappingAmbiguous,
+    ResultTooLarge,
+    CatalogUnavailable,
+    CatalogInvalid,
+    ObjectUnavailable,
+    ObjectInvalid,
+    ServiceUnavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryPreQueryRefusalV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub refusal_nonce: String,
+    pub reason: LauncherHistoryRefusalReasonV1,
+    pub terminal_identity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryQueryRefusalV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub query_identity: String,
+    pub reason: LauncherHistoryRefusalReasonV1,
+    pub terminal_identity: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LauncherHistoryManifestPostureV1 {
+    Complete,
+    Invalid,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherHistoryManifestTerminalV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub query_identity: String,
+    pub manifest_identity: String,
+    pub returned_count: u32,
+    pub posture: LauncherHistoryManifestPostureV1,
+    pub terminal_identity: String,
 }
 
 /// Client acknowledgement that the exact terminal frame was received. Selected execution keeps
@@ -2090,6 +2276,185 @@ pub fn launcher_terminal_persistence_v1_identity(
     message_identity(LAUNCHER_TERMINAL_PERSISTENCE_IDENTITY_DOMAIN_V1, &canonical)
 }
 
+pub fn launcher_history_query_v1_identity(
+    query: &LauncherHistoryQueryV1,
+) -> Result<String, ProtocolError> {
+    if query.schema_version != 1
+        || query.message_kind != LAUNCHER_HISTORY_QUERY
+        || query.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_bounded_label(&query.query_nonce, 128)
+        || query
+            .archive_identity
+            .as_deref()
+            .is_some_and(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = query.clone();
+    canonical.query_identity.clear();
+    message_identity(LAUNCHER_HISTORY_QUERY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_history_manifest_v1_identity(
+    manifest: &LauncherHistoryManifestV1,
+) -> Result<String, ProtocolError> {
+    let count =
+        usize::try_from(manifest.total_selected_count).map_err(|_| ProtocolError::InvalidRecord)?;
+    if manifest.schema_version != 1
+        || manifest.message_kind != LAUNCHER_HISTORY_MANIFEST
+        || manifest.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_sha256_identity(&manifest.query_identity)
+        || !is_sha256_identity(&manifest.repository_binding_identity)
+        || !is_sha256_identity(&manifest.catalog_namespace_identity)
+        || !is_sha256_identity(&manifest.operator_profile_identity)
+        || !is_sha256_identity(&manifest.operator_peer_identity)
+        || count != manifest.catalog_entry_identities.len()
+        || count > MAX_HISTORY_ENTRY_COUNT_V1
+        || manifest.bounded_response_bytes > MAX_HISTORY_RESPONSE_BYTES_V1
+        || (count == 0) != (manifest.bounded_response_bytes == 0)
+        || !is_sha256_identity(&manifest.catalog_snapshot_identity)
+        || manifest
+            .catalog_entry_identities
+            .iter()
+            .any(|identity| !is_sha256_identity(identity))
+        || has_duplicate_strings(&manifest.catalog_entry_identities)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = manifest.clone();
+    canonical.manifest_identity.clear();
+    message_identity(LAUNCHER_HISTORY_MANIFEST_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_history_entry_v1_identity(
+    entry: &LauncherHistoryEntryV1,
+) -> Result<String, ProtocolError> {
+    if entry.schema_version != 1
+        || entry.message_kind != LAUNCHER_HISTORY_ENTRY
+        || entry.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_sha256_identity(&entry.manifest_identity)
+        || !is_sha256_identity(&entry.catalog_identity)
+        || !is_sha256_identity(&entry.archive_object_identity)
+        || !is_sha256_identity(&entry.contract_snapshot_object_identity)
+        || !is_sha256_identity(&entry.sidecar_object_identity)
+        || entry.archive_object_identity == entry.contract_snapshot_object_identity
+        || entry.archive_object_identity == entry.sidecar_object_identity
+        || entry.contract_snapshot_object_identity == entry.sidecar_object_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = entry.clone();
+    canonical.entry_identity.clear();
+    message_identity(LAUNCHER_HISTORY_ENTRY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_history_object_v1_identity(
+    object: &LauncherHistoryObjectV1,
+) -> Result<String, ProtocolError> {
+    if object.schema_version != 1
+        || object.message_kind != LAUNCHER_HISTORY_OBJECT
+        || object.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_sha256_identity(&object.manifest_identity)
+        || !is_sha256_identity(&object.catalog_identity)
+        || !is_sha256_identity(&object.content_identity)
+        || object.byte_length == 0
+        || object.byte_length > MAX_HISTORY_RESPONSE_BYTES_V1
+        || object.chunk_count == 0
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = object.clone();
+    canonical.object_identity.clear();
+    message_identity(LAUNCHER_HISTORY_OBJECT_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_history_chunk_v1_identity(
+    chunk: &LauncherHistoryChunkV1,
+) -> Result<String, ProtocolError> {
+    if chunk.schema_version != 1
+        || chunk.message_kind != LAUNCHER_HISTORY_CHUNK
+        || chunk.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_sha256_identity(&chunk.object_identity)
+        || chunk.bytes.is_empty()
+        || chunk.bytes.len() > MAX_HISTORY_CHUNK_PAYLOAD_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = chunk.clone();
+    canonical.chunk_identity.clear();
+    message_identity(LAUNCHER_HISTORY_CHUNK_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn launcher_history_pre_query_refusal_v1_identity(
+    refusal: &LauncherHistoryPreQueryRefusalV1,
+) -> Result<String, ProtocolError> {
+    if refusal.schema_version != 1
+        || refusal.message_kind != LAUNCHER_HISTORY_PRE_QUERY_REFUSAL
+        || refusal.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_bounded_label(&refusal.refusal_nonce, 128)
+        || !matches!(
+            refusal.reason,
+            LauncherHistoryRefusalReasonV1::PeerAdmissionRefused
+                | LauncherHistoryRefusalReasonV1::MalformedQuery
+                | LauncherHistoryRefusalReasonV1::UnsupportedProtocol
+                | LauncherHistoryRefusalReasonV1::ServiceUnavailable
+        )
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = refusal.clone();
+    canonical.terminal_identity.clear();
+    message_identity(
+        LAUNCHER_HISTORY_PRE_QUERY_REFUSAL_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_history_query_refusal_v1_identity(
+    refusal: &LauncherHistoryQueryRefusalV1,
+) -> Result<String, ProtocolError> {
+    if refusal.schema_version != 1
+        || refusal.message_kind != LAUNCHER_HISTORY_QUERY_REFUSAL
+        || refusal.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_sha256_identity(&refusal.query_identity)
+        || matches!(
+            refusal.reason,
+            LauncherHistoryRefusalReasonV1::PeerAdmissionRefused
+                | LauncherHistoryRefusalReasonV1::MalformedQuery
+                | LauncherHistoryRefusalReasonV1::UnsupportedProtocol
+        )
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = refusal.clone();
+    canonical.terminal_identity.clear();
+    message_identity(
+        LAUNCHER_HISTORY_QUERY_REFUSAL_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn launcher_history_manifest_terminal_v1_identity(
+    terminal: &LauncherHistoryManifestTerminalV1,
+) -> Result<String, ProtocolError> {
+    if terminal.schema_version != 1
+        || terminal.message_kind != LAUNCHER_HISTORY_MANIFEST_TERMINAL
+        || terminal.protocol_version != SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1
+        || !is_sha256_identity(&terminal.query_identity)
+        || !is_sha256_identity(&terminal.manifest_identity)
+        || usize::try_from(terminal.returned_count)
+            .map_or(true, |count| count > MAX_HISTORY_ENTRY_COUNT_V1)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = terminal.clone();
+    canonical.terminal_identity.clear();
+    message_identity(
+        LAUNCHER_HISTORY_MANIFEST_TERMINAL_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
 pub fn validate_launcher_output_frame_v1(
     frame: &LauncherOutputFrameV1,
 ) -> Result<(), ProtocolError> {
@@ -2199,6 +2564,13 @@ fn is_absolute_bounded_path(value: &str, maximum_bytes: usize) -> bool {
         && value.starts_with('/')
         && !value.contains('\0')
         && !value.split('/').any(|component| component == "..")
+}
+
+fn has_duplicate_strings(values: &[String]) -> bool {
+    values
+        .iter()
+        .enumerate()
+        .any(|(index, value)| values[..index].contains(value))
 }
 
 pub fn encode_frame(payload: &[u8]) -> Result<Vec<u8>, ProtocolError> {
@@ -3401,6 +3773,178 @@ mod tests {
         assert_eq!(
             launcher_child_process_identity(&invalid_child),
             Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn protected_history_records_are_phase_bound_and_content_addressed() {
+        let sha = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let archive_sha = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let snapshot_sha =
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let sidecar_sha = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        let mut query = LauncherHistoryQueryV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_QUERY.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            query_nonce: "query-nonce-1".into(),
+            archive_identity: Some(sha.into()),
+            query_identity: String::new(),
+        };
+        query.query_identity = launcher_history_query_v1_identity(&query).expect("query identity");
+
+        let mut manifest = LauncherHistoryManifestV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_MANIFEST.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            query_identity: query.query_identity.clone(),
+            repository_binding_identity: sha.into(),
+            catalog_namespace_identity: sha.into(),
+            operator_profile_identity: archive_sha.into(),
+            operator_peer_identity: snapshot_sha.into(),
+            operator_attribution: LauncherHistoryOperatorAttributionV1::NonAgent,
+            operator_posture: LauncherHistoryOperatorPostureV1::LeastPrivilegeOperatorPeerVerified,
+            catalog_entry_identities: vec![sha.into()],
+            total_selected_count: 1,
+            bounded_response_bytes: 1024,
+            catalog_snapshot_identity: sha.into(),
+            manifest_identity: String::new(),
+        };
+        manifest.manifest_identity =
+            launcher_history_manifest_v1_identity(&manifest).expect("manifest identity");
+
+        let mut archive_object = LauncherHistoryObjectV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_OBJECT.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            manifest_identity: manifest.manifest_identity.clone(),
+            entry_ordinal: 0,
+            catalog_identity: sha.into(),
+            object_kind: LauncherHistoryObjectKindV1::Archive,
+            content_identity: archive_sha.into(),
+            byte_length: 4,
+            chunk_count: 1,
+            object_identity: String::new(),
+        };
+        archive_object.object_identity =
+            launcher_history_object_v1_identity(&archive_object).expect("archive object identity");
+        let mut snapshot_object = archive_object.clone();
+        snapshot_object.object_kind = LauncherHistoryObjectKindV1::ContractSnapshot;
+        snapshot_object.content_identity = snapshot_sha.into();
+        snapshot_object.object_identity.clear();
+        snapshot_object.object_identity = launcher_history_object_v1_identity(&snapshot_object)
+            .expect("snapshot object identity");
+        let mut sidecar_object = archive_object.clone();
+        sidecar_object.object_kind = LauncherHistoryObjectKindV1::Sidecar;
+        sidecar_object.content_identity = sidecar_sha.into();
+        sidecar_object.object_identity.clear();
+        sidecar_object.object_identity =
+            launcher_history_object_v1_identity(&sidecar_object).expect("sidecar object identity");
+        let mut archive_chunk = LauncherHistoryChunkV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_CHUNK.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            object_identity: archive_object.object_identity.clone(),
+            chunk_ordinal: 0,
+            bytes: b"test".to_vec(),
+            chunk_identity: String::new(),
+        };
+        archive_chunk.chunk_identity =
+            launcher_history_chunk_v1_identity(&archive_chunk).expect("chunk identity");
+        let mut changed_chunk = archive_chunk.clone();
+        changed_chunk.bytes[0] ^= 1;
+        assert_ne!(
+            launcher_history_chunk_v1_identity(&changed_chunk).expect("changed chunk identity"),
+            archive_chunk.chunk_identity
+        );
+
+        let mut entry = LauncherHistoryEntryV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_ENTRY.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            manifest_identity: manifest.manifest_identity.clone(),
+            entry_ordinal: 0,
+            catalog_identity: sha.into(),
+            archive_object_identity: archive_object.object_identity.clone(),
+            contract_snapshot_object_identity: snapshot_object.object_identity.clone(),
+            sidecar_object_identity: sidecar_object.object_identity.clone(),
+            entry_identity: String::new(),
+        };
+        entry.entry_identity = launcher_history_entry_v1_identity(&entry).expect("entry identity");
+        let mut aliased_entry = entry.clone();
+        aliased_entry.contract_snapshot_object_identity =
+            aliased_entry.archive_object_identity.clone();
+        assert_eq!(
+            launcher_history_entry_v1_identity(&aliased_entry),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut pre_query = LauncherHistoryPreQueryRefusalV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_PRE_QUERY_REFUSAL.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            refusal_nonce: "refusal-nonce-1".into(),
+            reason: LauncherHistoryRefusalReasonV1::MalformedQuery,
+            terminal_identity: String::new(),
+        };
+        pre_query.terminal_identity = launcher_history_pre_query_refusal_v1_identity(&pre_query)
+            .expect("pre-query terminal identity");
+
+        let mut query_refusal = LauncherHistoryQueryRefusalV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_QUERY_REFUSAL.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            query_identity: query.query_identity.clone(),
+            reason: LauncherHistoryRefusalReasonV1::ResultTooLarge,
+            terminal_identity: String::new(),
+        };
+        query_refusal.terminal_identity =
+            launcher_history_query_refusal_v1_identity(&query_refusal)
+                .expect("query terminal identity");
+
+        let mut complete = LauncherHistoryManifestTerminalV1 {
+            schema_version: 1,
+            message_kind: LAUNCHER_HISTORY_MANIFEST_TERMINAL.into(),
+            protocol_version: SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1.into(),
+            query_identity: query.query_identity.clone(),
+            manifest_identity: manifest.manifest_identity.clone(),
+            returned_count: 1,
+            posture: LauncherHistoryManifestPostureV1::Complete,
+            terminal_identity: String::new(),
+        };
+        complete.terminal_identity = launcher_history_manifest_terminal_v1_identity(&complete)
+            .expect("manifest terminal identity");
+
+        assert!(is_sha256_identity(&pre_query.terminal_identity));
+        assert!(is_sha256_identity(&query_refusal.terminal_identity));
+        assert!(is_sha256_identity(&complete.terminal_identity));
+
+        query_refusal.reason = LauncherHistoryRefusalReasonV1::MalformedQuery;
+        assert_eq!(
+            launcher_history_query_refusal_v1_identity(&query_refusal),
+            Err(ProtocolError::InvalidRecord)
+        );
+        pre_query.reason = LauncherHistoryRefusalReasonV1::ResultTooLarge;
+        assert_eq!(
+            launcher_history_pre_query_refusal_v1_identity(&pre_query),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        manifest.catalog_entry_identities.push(sha.into());
+        manifest.total_selected_count = 2;
+        assert_eq!(
+            launcher_history_manifest_v1_identity(&manifest),
+            Err(ProtocolError::InvalidRecord)
+        );
+        manifest.catalog_entry_identities.pop();
+        manifest.total_selected_count = 1;
+        let original_manifest_identity = manifest.manifest_identity.clone();
+        manifest.operator_peer_identity = sidecar_sha.into();
+        manifest.manifest_identity.clear();
+        assert_ne!(
+            launcher_history_manifest_v1_identity(&manifest)
+                .expect("changed operator peer identity"),
+            original_manifest_identity
         );
     }
 

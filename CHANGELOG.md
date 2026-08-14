@@ -26,6 +26,13 @@
 
 ## Unreleased
 
+- Add the bounded systemd protected-history protocol. One nonce-bound query returns either a
+  phase-specific refusal or one complete content-addressed manifest. Each ordered catalog entry
+  binds three acyclic object identities for the receipt archive, immutable contract snapshot, and
+  launcher-finalization sidecar; bounded chunks bind exact bytes and a completed terminal binds
+  the returned count. The manifest also binds protected repository/catalog selection and the
+  admitted non-agent operator profile and live peer without exposing protected paths.
+
 - Version launcher execution finalization so restart recovery cannot invent child-exit evidence.
   Live schema-v1 evidence retains the launcher-observed exit and reaping claim. Schema v2 instead
   records `recovered_absent_completion_bound`, requires exact child absence, and forbids both an

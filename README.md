@@ -117,6 +117,38 @@ second authority decision and not a lease. Recovery adds `lease_consumption_quer
 old work unit: it reconciles the broker result, finalizes the abandoned local transaction as
 incomplete, and requires a new authorization for any later execution.
 
+### Protected history sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Operator as Installed non-root client
+    participant History as Protected history service
+    participant Store as Launcher-owned catalog
+    participant Core as Ota Core verifier
+
+    Operator->>History: Nonce-bound query with optional archive identity
+    History->>History: Verify pidfd, executable, process posture, and repository mapping
+    History->>Store: Freeze ordered catalog snapshot
+    Store-->>History: Archive, immutable contract snapshot, and signed sidecar
+    History-->>Operator: Manifest with operator, repository, and catalog identities
+    loop Each selected catalog entry
+        History-->>Operator: Entry and three ordered content-addressed objects
+        History-->>Operator: Bounded identity-checked chunks
+    end
+    History->>History: Reverify the complete operator session
+    History-->>Operator: Completed manifest terminal
+    Operator->>Core: Exact reconstructed objects and protected selection evidence
+    Core->>Core: Re-derive contract, scope, authority, transaction, cleanup, and archive truth
+```
+
+The first protected-history profile is one complete bounded snapshot with no pagination. A
+pre-query refusal carries no invented query or manifest identity; a valid-query refusal carries no
+manifest identity; a successful terminal requires the exact query and manifest identities. Object
+identities derive from manifest, entry ordinal, catalog, kind, content identity, length, and chunk
+count before the entry binds the three object identities, avoiding a circular hash dependency.
+Repository and protected storage paths never cross this wire boundary.
+
 For the protected systemd carrier, selected execution adds two private Core-to-launcher messages.
 `launcher_execution_completion` binds the terminal crossing transaction, receipt posture, exact
 work unit, and consumed-lease admission. The launcher durably journals that record before replying
