@@ -2135,7 +2135,7 @@ pub fn validate_launcher_terminal_frame_v1(
             finalization.completion.outcome == LauncherExecutionOutcomeV1::Failed
                 && frame.invocation_id == finalization.completion.invocation_id
                 && frame.outcome == LauncherTerminalOutcomeV1::Failed
-                && frame.exit_code == finalization.observed_exit_code
+                && frame.exit_code == finalization.completion.exit_code
                 && launcher_execution_finalization_v1_identity(finalization)
                     .ok()
                     .as_deref()
@@ -2148,7 +2148,7 @@ pub fn validate_launcher_terminal_frame_v1(
             finalization.completion.outcome == LauncherExecutionOutcomeV1::Interrupted
                 && frame.invocation_id == finalization.completion.invocation_id
                 && frame.outcome == LauncherTerminalOutcomeV1::Cancelled
-                && frame.exit_code == finalization.observed_exit_code
+                && frame.exit_code == finalization.completion.exit_code
                 && launcher_execution_finalization_v1_identity(finalization)
                     .ok()
                     .as_deref()
@@ -3623,6 +3623,12 @@ mod tests {
         assert_eq!(
             validate_launcher_terminal_frame_v1(&recovered_terminal),
             Ok(())
+        );
+        let mut recovered_without_completion_exit = recovered_terminal.clone();
+        recovered_without_completion_exit.exit_code = None;
+        assert_eq!(
+            validate_launcher_terminal_frame_v1(&recovered_without_completion_exit),
+            Err(ProtocolError::InvalidRecord)
         );
 
         let mut dishonest_recovery = recovered;
