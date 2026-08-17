@@ -26,8 +26,8 @@
 
 Canonical, provider-neutral wire protocol for Ota crossing authority.
 
-This crate publishes the stable message model, framing rules, semantic identity helpers, and
-foundation vectors intended for Ota Core, trusted launchers, and independently operated authority
+This crate publishes the versioned message model, framing rules, semantic identity helpers, and
+conformance vectors used by Ota Core, trusted launchers, and independently operated authority
 brokers. Cross-repository conformance becomes established only when those consumers pin and test
 the same immutable crate revision.
 
@@ -38,16 +38,17 @@ This repository owns:
 - protocol version and message-kind constants;
 - exact serialized request, attestation, decision, lease, and consumption types;
 - additive runtime-boundary attestation v2 types and canonical protected-launcher profiles;
-- immutable principal-mapping, Ota process-posture, and systemd launcher-profile foundations for
-  the planned production protected-launcher adapter;
+- immutable principal-mapping, Ota process-posture, and systemd launcher-profile records used by
+  the production protected-launcher adapter;
 - the bounded Linux systemd-launcher client/service request, output, and terminal frames;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
 - compatibility and adversarial conformance tests.
 
 It does not own repository contracts, semantic-scope derivation, admission policy, signing keys,
-approval workflows, broker persistence, transport credentials, execution, receipts, or archives.
-Those remain with Ota Core, the authority launcher, and the chosen broker implementation.
+approval workflows, broker persistence, transport credentials, execution, receipt creation,
+protected archive storage, or semantic archive verification. Those remain with Ota Core, the
+authority launcher, and the chosen broker implementation.
 
 ## Wire sequence
 
@@ -56,12 +57,13 @@ sequenceDiagram
     autonumber
     participant Core as Ota Core
     participant Launcher as Trusted launcher
+    participant Attestor as Protected attestation producer
     participant Broker as Authority broker
 
     Core->>Core: Freeze contract, semantic scope, work unit, and nonce commitment
     Core->>Launcher: challenge_request
-    Launcher->>Broker: Relay framed challenge
-    Broker-->>Launcher: attestation_response (signed)
+    Launcher->>Attestor: Submit challenge-bound observed claims
+    Attestor-->>Launcher: attestation_response (signed)
     Launcher-->>Core: Relay signed attestation
     Core->>Core: Verify challenge, scope, work unit, origin, and freshness
 
@@ -106,7 +108,7 @@ sequenceDiagram
     end
 ```
 
-The seven broker wire messages, in order, are `challenge_request`, `attestation_response`,
+The seven authority-exchange messages, in order, are `challenge_request`, `attestation_response`,
 `authorization_request`, `authorization_decision`, `lease_issuance`, `lease_consume`, and
 `lease_consume_response`. The protected local launcher session additionally carries
 `authorization_decision_admission`: a Core-authored acknowledgement that binds the exact verified
@@ -213,11 +215,11 @@ Every JSON payload is carried in one frame: a four-byte unsigned big-endian payl
 by at most 64 KiB of UTF-8 JSON. Signed-message and identity domains are fixed protocol constants;
 this crate canonicalizes bytes and publishes profile identities but does not select trust roots.
 
-## Production launcher foundations
+## Production launcher records
 
-The planned `systemd_protected_launcher/v1` adapter keeps broker semantics unchanged. This crate
-publishes only the immutable records that Core and the launcher must agree on before that adapter
-can execute:
+The implemented `systemd_protected_launcher/v1` adapter keeps broker semantics unchanged. This
+crate publishes only the immutable records that Core and the launcher must agree on before that
+adapter can execute:
 
 - `LauncherPrincipalMappingV1` binds one protected job-peer identity to one distinct execution
   identity plus the fixed job-principal profile and launcher-session binding. Its identity is used
@@ -289,10 +291,38 @@ The envelope carries no broker credential, caller identity assertion, semantic s
 Core and the launcher establish those values through the protected session and signed broker
 protocol after the service has admitted the request.
 
+## Consume and verify
+
+Ota Core and Authority Launcher must use the same reviewed immutable revision. The Ota v1.6.26
+carrier pins protocol implementation commit
+`04a199a1eddd72b5b61958e0fe7f2d4e662e05cf`:
+
+```toml
+ota-authority-protocol = { git = "https://github.com/ota-run/authority-protocol.git", rev = "04a199a1eddd72b5b61958e0fe7f2d4e662e05cf" }
+```
+
+Changing that pin is a protocol compatibility change and requires both consumers to be repinned
+and revalidated together. Verify this crate with Rust `1.95.0`:
+
+```sh
+cargo fmt --check
+cargo check --locked --all-targets
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+```
+
 ## Status
 
-Preview foundation. Consumers should pin an immutable Git revision until a stable crate release is
-published.
+The protocol used by the bounded Linux/systemd carrier is implemented and conformance-tested across
+[Ota Core](https://github.com/ota-run/ota) and
+[Ota Authority Launcher](https://github.com/ota-run/authority-launcher). This crate is currently
+source-distributed rather than published as a stable crate release. Consumers must pin the exact
+immutable revision used by both peers; branch references do not establish protocol compatibility.
+
+The public operator model and deployment boundaries are documented in the
+[Broker Crossing Authority reference](https://ota.run/docs/reference/broker-crossing-authority).
+Provider attestation, hosted approval operation, and non-Linux carriers remain outside this
+protocol release posture.
 
 ## License
 

@@ -26,6 +26,11 @@
 
 ## Unreleased
 
+- Reconcile the README with the implemented protocol boundary: remove stale preview/planned
+  wording, distinguish versioned conformance-tested source from a stable crate release, and show
+  the protected attestation producer separately from broker authorization in the wire sequence.
+  Canonical and hosted verification now use the exact locked dependency graph documented there.
+
 - Add the bounded systemd protected-history protocol. One nonce-bound query returns either a
   phase-specific refusal or one complete content-addressed manifest. Each ordered catalog entry
   binds three acyclic object identities for the receipt archive, immutable contract snapshot, and
@@ -46,8 +51,8 @@
   Completion binds the immutable receipt-archive identity, and the response may identify the
   launcher-published sidecar without exposing archive bytes to the job principal. Add a separate
   identity-bound terminal persistence acknowledgement so the launcher can retain and replay the
-  exact terminal until delivery is confirmed. Immutable PID 1 pressure and consumer release
-  pinning remain required before this protocol is shipped.
+  exact terminal until delivery is confirmed. Subsequent immutable PID 1 pressure and exact
+  consumer pinning close that delivery boundary for the bounded Linux/systemd carrier.
 
 - Add the protected systemd selected-execution completion and finalization protocol. Core reports
   one identity-bound terminal crossing transaction and receipt outcome; the launcher persists that
@@ -99,7 +104,7 @@
 - Add the distinct runtime-boundary attestation v2 wire model, protected-launcher profile
   definitions, content-addressed profile identities, and downgrade-resistant conformance vectors
   without changing the v1 launcher-attestation shape.
-- Add the planned production systemd protected-launcher foundation: content-addressed one-to-one
+- Add the production systemd protected-launcher identity foundation: content-addressed one-to-one
   principal mapping, adapter-local Ota process posture, archive-rederivable instance evidence, and
   closed launcher/job-principal profile definitions with requirement-specific evidence methods.
   This adds no executable launcher or provider-attested claim.

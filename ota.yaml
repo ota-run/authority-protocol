@@ -46,19 +46,19 @@ tasks:
   check:
     description: Type-check all protocol targets
     category: test
-    command: { exe: cargo, args: [check, --all-targets] }
+    command: { exe: cargo, args: [check, --locked, --all-targets] }
     requirements: { toolchains: [rust] }
     safe_for_agent: true
   clippy:
     description: Run strict Rust linting
     category: test
-    command: { exe: cargo, args: [clippy, --all-targets, --, -D, warnings] }
+    command: { exe: cargo, args: [clippy, --locked, --all-targets, --, -D, warnings] }
     requirements: { toolchains: [rust] }
     safe_for_agent: true
   test:
     description: Run protocol conformance tests
     category: test
-    command: { exe: cargo, args: [test, --all-targets] }
+    command: { exe: cargo, args: [test, --locked, --all-targets] }
     requirements: { toolchains: [rust] }
     safe_for_agent: true
   verify:
