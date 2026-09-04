@@ -61,6 +61,7 @@ pub const MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1: usize = 15 * 1024;
 pub const MAX_HISTORY_ENTRY_COUNT_V1: usize = 256;
 pub const MAX_HISTORY_CHUNK_PAYLOAD_BYTES_V1: usize = 15 * 1024;
 pub const MAX_HISTORY_RESPONSE_BYTES_V1: u64 = 16 * 1024 * 1024;
+pub const MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1: usize = 64 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
 pub const ATTESTATION_RESPONSE: &str = "attestation_response";
@@ -76,6 +77,7 @@ pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
 pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
 pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY: &str = "protected_launcher_capability";
 pub const LAUNCHER_STARTUP_CONTINUATION: &str = "launcher_startup_continuation";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST: &str = "launcher_attestation_signing_request";
 pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE: &str = "launcher_attestation_signing_response";
@@ -136,6 +138,14 @@ pub const LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.child-process.v1\0";
 pub const LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.systemd-scope.v1\0";
+pub const PROTECTED_LAUNCHER_DESCRIPTOR_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-descriptor.v1\0";
+pub const PROTECTED_LAUNCHER_STORE_CONTENT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-store-content.v1\0";
+pub const PROTECTED_LAUNCHER_CGROUP_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-cgroup.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-capability.v1\0";
 pub const LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.startup-continuation.v1\0";
 pub const AUTHORIZATION_DECISION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
@@ -313,6 +323,111 @@ pub struct LauncherSystemdScopeV1 {
     pub delegate: bool,
     pub kill_mode: String,
     pub collect_mode: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedLauncherDescriptorRoleV1 {
+    LauncherSessionSocket,
+    VerifierStore,
+    BindingStore,
+    InvocationCgroup,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedLauncherDescriptorKindV1 {
+    UnixStreamSocket,
+    RegularFile,
+    Directory,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedLauncherDescriptorAccessV1 {
+    ReadOnly,
+    ReadWrite,
+}
+
+/// Metadata for one descriptor retained across the protected launcher boundary.
+///
+/// This record carries no path or file content. The launcher and Core independently reconcile
+/// the live descriptor and exact bytes where the role requires them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherDescriptorV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub role: ProtectedLauncherDescriptorRoleV1,
+    pub kind: ProtectedLauncherDescriptorKindV1,
+    pub access: ProtectedLauncherDescriptorAccessV1,
+    pub device: u64,
+    pub inode: u64,
+    pub owner_uid: u32,
+    pub owner_gid: u32,
+    pub mode: u32,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_identity: Option<String>,
+}
+
+/// Protected-launcher facts retained for one exact unprivileged Ota invocation.
+///
+/// This is capability evidence, not crossing authority, provider authority, or a bearer-token
+/// carrier. Token and provider response bytes must never enter this record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub launcher_request_identity: String,
+    pub launcher_executable_identity: String,
+    pub launcher_configuration_identity: String,
+    pub launcher_service_binding_identity: String,
+    pub launcher_profile_identity: String,
+    pub runner_administrator_identity: String,
+    pub service_uid: u32,
+    pub service_gid: u32,
+    pub invocation_nonce_identity: String,
+    pub boot_identity: String,
+    pub protected_launcher_instance_identity: String,
+    pub systemd_invocation_identity: String,
+    pub systemd_scope_identity: String,
+    pub cgroup_identity: String,
+    pub child_process_identity: String,
+    pub principal_mapping_identity: String,
+    pub process_posture_identity: String,
+    pub implementation_subject_identity: String,
+    pub descriptors: Vec<ProtectedLauncherDescriptorV1>,
+}
+
+/// Independently observed records used to reconcile a protected capability.
+///
+/// This is an in-process verification input, not a serialized wire message. The protected store
+/// bytes are consumed only to rederive their role-specific identities.
+#[derive(Clone, Copy)]
+pub struct ProtectedLauncherCapabilityEvidenceV1<'a> {
+    pub request: &'a LauncherInvocationRequestV1,
+    pub child: &'a LauncherChildProcessV1,
+    pub scope: &'a LauncherSystemdScopeV1,
+    pub principal_mapping: &'a LauncherPrincipalMappingV1,
+    pub process_posture: &'a OtaProcessPostureV1,
+    pub launcher_instance: &'a SystemdProtectedLauncherInstanceEvidenceV2,
+    pub launcher_executable_identity: &'a str,
+    pub launcher_configuration_identity: &'a str,
+    pub launcher_service_binding_identity: &'a str,
+    pub launcher_profile_identity: &'a str,
+    pub runner_administrator_identity: &'a str,
+    pub service_uid: u32,
+    pub service_gid: u32,
+    pub invocation_nonce_identity: &'a str,
+    pub boot_identity: &'a str,
+    pub implementation_subject_identity: &'a str,
+    pub observed_descriptors: &'a [ProtectedLauncherDescriptorV1],
+    pub verifier_store_bytes: &'a [u8],
+    pub binding_store_bytes: &'a [u8],
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1786,6 +1901,277 @@ pub fn launcher_systemd_scope_identity(
     let mut canonical = scope.clone();
     canonical.identity.clear();
     message_identity(LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn protected_launcher_descriptor_v1_identity(
+    descriptor: &ProtectedLauncherDescriptorV1,
+) -> Result<String, ProtocolError> {
+    let role_shape_valid = match descriptor.role {
+        ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket => {
+            descriptor.kind == ProtectedLauncherDescriptorKindV1::UnixStreamSocket
+                && descriptor.access == ProtectedLauncherDescriptorAccessV1::ReadWrite
+        }
+        ProtectedLauncherDescriptorRoleV1::VerifierStore
+        | ProtectedLauncherDescriptorRoleV1::BindingStore => {
+            descriptor.kind == ProtectedLauncherDescriptorKindV1::RegularFile
+                && descriptor.access == ProtectedLauncherDescriptorAccessV1::ReadOnly
+                && descriptor.owner_uid == 0
+                && descriptor.owner_gid == 0
+                && descriptor.mode == 0o400
+                && descriptor
+                    .content_identity
+                    .as_deref()
+                    .is_some_and(is_sha256_identity)
+        }
+        ProtectedLauncherDescriptorRoleV1::InvocationCgroup => {
+            descriptor.kind == ProtectedLauncherDescriptorKindV1::Directory
+                && descriptor.access == ProtectedLauncherDescriptorAccessV1::ReadOnly
+                && descriptor.owner_uid == 0
+                && descriptor.owner_gid == 0
+        }
+    };
+    if descriptor.schema_version != 1
+        || descriptor.inode == 0
+        || descriptor.mode > 0o7777
+        || matches!(
+            descriptor.role,
+            ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket
+                | ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+        ) && descriptor.content_identity.is_some()
+        || !role_shape_valid
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = descriptor.clone();
+    canonical.identity.clear();
+    message_identity(PROTECTED_LAUNCHER_DESCRIPTOR_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+#[derive(Serialize)]
+struct ProtectedLauncherStoreContentIdentityInputV1<'a> {
+    role: ProtectedLauncherDescriptorRoleV1,
+    bytes: &'a [u8],
+}
+
+pub fn protected_launcher_store_content_identity_v1(
+    role: ProtectedLauncherDescriptorRoleV1,
+    bytes: &[u8],
+) -> Result<String, ProtocolError> {
+    if !matches!(
+        role,
+        ProtectedLauncherDescriptorRoleV1::VerifierStore
+            | ProtectedLauncherDescriptorRoleV1::BindingStore
+    ) || bytes.is_empty()
+        || bytes.len() > MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_STORE_CONTENT_IDENTITY_DOMAIN_V1,
+        &ProtectedLauncherStoreContentIdentityInputV1 { role, bytes },
+    )
+}
+
+#[derive(Serialize)]
+struct ProtectedLauncherCgroupIdentityInputV1<'a> {
+    scope_identity: &'a str,
+    control_group: &'a str,
+    descriptor_identity: &'a str,
+}
+
+pub fn protected_launcher_cgroup_v1_identity(
+    scope: &LauncherSystemdScopeV1,
+    descriptor: &ProtectedLauncherDescriptorV1,
+) -> Result<String, ProtocolError> {
+    if launcher_systemd_scope_identity(scope)? != scope.identity
+        || descriptor.role != ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+        || protected_launcher_descriptor_v1_identity(descriptor)? != descriptor.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_CGROUP_IDENTITY_DOMAIN_V1,
+        &ProtectedLauncherCgroupIdentityInputV1 {
+            scope_identity: scope.identity.as_str(),
+            control_group: scope.control_group.as_str(),
+            descriptor_identity: descriptor.identity.as_str(),
+        },
+    )
+}
+
+pub fn protected_launcher_capability_v1_identity(
+    capability: &ProtectedLauncherCapabilityV1,
+) -> Result<String, ProtocolError> {
+    const REQUIRED_ROLES: [ProtectedLauncherDescriptorRoleV1; 4] = [
+        ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket,
+        ProtectedLauncherDescriptorRoleV1::VerifierStore,
+        ProtectedLauncherDescriptorRoleV1::BindingStore,
+        ProtectedLauncherDescriptorRoleV1::InvocationCgroup,
+    ];
+
+    if capability.schema_version != 1
+        || capability.message_kind != PROTECTED_LAUNCHER_CAPABILITY
+        || capability.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || capability.service_uid != 0
+        || capability.service_gid != 0
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+
+    for identity in [
+        capability.launcher_request_identity.as_str(),
+        capability.launcher_executable_identity.as_str(),
+        capability.launcher_configuration_identity.as_str(),
+        capability.launcher_service_binding_identity.as_str(),
+        capability.launcher_profile_identity.as_str(),
+        capability.runner_administrator_identity.as_str(),
+        capability.invocation_nonce_identity.as_str(),
+        capability.boot_identity.as_str(),
+        capability.protected_launcher_instance_identity.as_str(),
+        capability.systemd_invocation_identity.as_str(),
+        capability.systemd_scope_identity.as_str(),
+        capability.cgroup_identity.as_str(),
+        capability.child_process_identity.as_str(),
+        capability.principal_mapping_identity.as_str(),
+        capability.process_posture_identity.as_str(),
+        capability.implementation_subject_identity.as_str(),
+    ] {
+        if !is_sha256_identity(identity) {
+            return Err(ProtocolError::InvalidRecord);
+        }
+    }
+
+    if capability.descriptors.len() != REQUIRED_ROLES.len() {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut descriptors = capability.descriptors.clone();
+    descriptors.sort_by_key(|descriptor| descriptor.role);
+    if descriptors
+        .iter()
+        .zip(REQUIRED_ROLES)
+        .any(|(descriptor, required_role)| {
+            descriptor.role != required_role
+                || protected_launcher_descriptor_v1_identity(descriptor).as_deref()
+                    != Ok(descriptor.identity.as_str())
+        })
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    if descriptors.iter().enumerate().any(|(index, descriptor)| {
+        descriptors[..index].iter().any(|previous| {
+            previous.device == descriptor.device && previous.inode == descriptor.inode
+        })
+    }) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+
+    let mut canonical = capability.clone();
+    canonical.identity.clear();
+    canonical.descriptors = descriptors;
+    message_identity(PROTECTED_LAUNCHER_CAPABILITY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+fn canonical_protected_launcher_descriptors(
+    descriptors: &[ProtectedLauncherDescriptorV1],
+) -> Vec<ProtectedLauncherDescriptorV1> {
+    let mut descriptors = descriptors.to_vec();
+    descriptors.sort_by_key(|descriptor| descriptor.role);
+    descriptors
+}
+
+pub fn validate_protected_launcher_capability_v1(
+    capability: &ProtectedLauncherCapabilityV1,
+    evidence: &ProtectedLauncherCapabilityEvidenceV1<'_>,
+) -> Result<(), ProtocolError> {
+    if protected_launcher_capability_v1_identity(capability)? != capability.identity {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_launcher_invocation_request_v1(evidence.request)?;
+    let request_identity = launcher_invocation_request_identity(evidence.request)?;
+    let child_identity = launcher_child_process_identity(evidence.child)?;
+    let scope_identity = launcher_systemd_scope_identity(evidence.scope)?;
+    let principal_mapping_identity =
+        launcher_principal_mapping_identity(evidence.principal_mapping)?;
+    let process_posture_identity = ota_process_posture_identity(evidence.process_posture)?;
+    validate_systemd_protected_launcher_instance_v3(evidence.launcher_instance)?;
+
+    let observed_descriptors =
+        canonical_protected_launcher_descriptors(evidence.observed_descriptors);
+    if observed_descriptors != canonical_protected_launcher_descriptors(&capability.descriptors) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let verifier_descriptor = observed_descriptors
+        .iter()
+        .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore)
+        .ok_or(ProtocolError::InvalidRecord)?;
+    let binding_descriptor = observed_descriptors
+        .iter()
+        .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore)
+        .ok_or(ProtocolError::InvalidRecord)?;
+    let cgroup_descriptor = observed_descriptors
+        .iter()
+        .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::InvocationCgroup)
+        .ok_or(ProtocolError::InvalidRecord)?;
+    let verifier_store_identity = protected_launcher_store_content_identity_v1(
+        ProtectedLauncherDescriptorRoleV1::VerifierStore,
+        evidence.verifier_store_bytes,
+    )?;
+    let binding_store_identity = protected_launcher_store_content_identity_v1(
+        ProtectedLauncherDescriptorRoleV1::BindingStore,
+        evidence.binding_store_bytes,
+    )?;
+    let cgroup_identity = protected_launcher_cgroup_v1_identity(evidence.scope, cgroup_descriptor)?;
+
+    let instance = &evidence.launcher_instance.instance_v1;
+    if capability.launcher_request_identity != request_identity
+        || capability.launcher_executable_identity != evidence.launcher_executable_identity
+        || capability.launcher_configuration_identity != evidence.launcher_configuration_identity
+        || capability.launcher_service_binding_identity
+            != evidence.launcher_service_binding_identity
+        || capability.launcher_profile_identity != evidence.launcher_profile_identity
+        || capability.runner_administrator_identity != evidence.runner_administrator_identity
+        || capability.service_uid != evidence.service_uid
+        || capability.service_gid != evidence.service_gid
+        || capability.invocation_nonce_identity != evidence.invocation_nonce_identity
+        || capability.boot_identity != evidence.boot_identity
+        || capability.protected_launcher_instance_identity != evidence.launcher_instance.identity
+        || capability.systemd_invocation_identity != scope_identity
+        || capability.systemd_scope_identity != scope_identity
+        || capability.cgroup_identity != cgroup_identity
+        || capability.child_process_identity != child_identity
+        || capability.principal_mapping_identity != principal_mapping_identity
+        || capability.process_posture_identity != process_posture_identity
+        || capability.implementation_subject_identity != evidence.implementation_subject_identity
+        || evidence.child.identity != child_identity
+        || evidence.child.request_identity != request_identity
+        || evidence.child.principal_mapping_identity != principal_mapping_identity
+        || evidence.scope.identity != scope_identity
+        || evidence.scope.request_identity != request_identity
+        || evidence.scope.child_identity != child_identity
+        || evidence.scope.child_pid != evidence.child.pid
+        || evidence.scope.invocation_id != evidence.child.invocation_id
+        || evidence.principal_mapping.identity != principal_mapping_identity
+        || evidence.process_posture.identity != process_posture_identity
+        || evidence.process_posture.pid != evidence.child.pid
+        || evidence.process_posture.process_start_time_identity
+            != evidence.child.process_start_time_identity
+        || evidence.process_posture.ota_binary_identity != evidence.child.ota_binary_identity
+        || evidence.process_posture.principal_mapping_identity != principal_mapping_identity
+        || instance.principal_mapping != *evidence.principal_mapping
+        || instance.process_posture != *evidence.process_posture
+        || instance.systemd_launcher_profile_identity != evidence.launcher_profile_identity
+        || instance.launcher_session_binding_identity != evidence.launcher_configuration_identity
+        || instance.systemd_invocation_identity != scope_identity
+        || instance.working_directory_identity != evidence.child.working_directory_identity
+        || instance.child_process_identity != child_identity
+        || verifier_descriptor.content_identity.as_deref() != Some(verifier_store_identity.as_str())
+        || verifier_descriptor.size != evidence.verifier_store_bytes.len() as u64
+        || binding_descriptor.content_identity.as_deref() != Some(binding_store_identity.as_str())
+        || binding_descriptor.size != evidence.binding_store_bytes.len() as u64
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
 }
 
 pub fn launcher_execution_completion_v1_identity(
@@ -3531,6 +3917,112 @@ pub fn derive_work_unit_identity(
 mod tests {
     use super::*;
 
+    const VERIFIER_STORE_BYTES: &[u8] = br#"{"schema_version":1,"verifiers":[]}"#;
+    const BINDING_STORE_BYTES: &[u8] = br#"{"schema_version":1,"bindings":[]}"#;
+
+    fn protected_descriptor(
+        role: ProtectedLauncherDescriptorRoleV1,
+        seed: u64,
+    ) -> ProtectedLauncherDescriptorV1 {
+        let (kind, access, owner_gid, mode, size) = match role {
+            ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket => (
+                ProtectedLauncherDescriptorKindV1::UnixStreamSocket,
+                ProtectedLauncherDescriptorAccessV1::ReadWrite,
+                995,
+                0o660,
+                0,
+            ),
+            ProtectedLauncherDescriptorRoleV1::VerifierStore
+            | ProtectedLauncherDescriptorRoleV1::BindingStore => (
+                ProtectedLauncherDescriptorKindV1::RegularFile,
+                ProtectedLauncherDescriptorAccessV1::ReadOnly,
+                0,
+                0o400,
+                match role {
+                    ProtectedLauncherDescriptorRoleV1::VerifierStore => {
+                        VERIFIER_STORE_BYTES.len() as u64
+                    }
+                    ProtectedLauncherDescriptorRoleV1::BindingStore => {
+                        BINDING_STORE_BYTES.len() as u64
+                    }
+                    _ => unreachable!(),
+                },
+            ),
+            ProtectedLauncherDescriptorRoleV1::InvocationCgroup => (
+                ProtectedLauncherDescriptorKindV1::Directory,
+                ProtectedLauncherDescriptorAccessV1::ReadOnly,
+                0,
+                0o755,
+                0,
+            ),
+        };
+        let mut descriptor = ProtectedLauncherDescriptorV1 {
+            schema_version: 1,
+            identity: String::new(),
+            role,
+            kind,
+            access,
+            device: seed,
+            inode: 1000 + seed,
+            owner_uid: 0,
+            owner_gid,
+            mode,
+            size,
+            content_identity: match role {
+                ProtectedLauncherDescriptorRoleV1::VerifierStore => Some(
+                    protected_launcher_store_content_identity_v1(role, VERIFIER_STORE_BYTES)
+                        .expect("verifier content identity"),
+                ),
+                ProtectedLauncherDescriptorRoleV1::BindingStore => Some(
+                    protected_launcher_store_content_identity_v1(role, BINDING_STORE_BYTES)
+                        .expect("binding content identity"),
+                ),
+                _ => None,
+            },
+        };
+        descriptor.identity = protected_launcher_descriptor_v1_identity(&descriptor)
+            .expect("protected descriptor identity");
+        descriptor
+    }
+
+    fn protected_capability() -> ProtectedLauncherCapabilityV1 {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let descriptors = vec![
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket, 1),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::VerifierStore, 2),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::BindingStore, 3),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::InvocationCgroup, 4),
+        ];
+        let mut capability = ProtectedLauncherCapabilityV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            launcher_request_identity: identity('1'),
+            launcher_executable_identity: identity('2'),
+            launcher_configuration_identity: identity('3'),
+            launcher_service_binding_identity: identity('4'),
+            launcher_profile_identity: identity('5'),
+            runner_administrator_identity: identity('6'),
+            service_uid: 0,
+            service_gid: 0,
+            invocation_nonce_identity: identity('7'),
+            boot_identity: identity('8'),
+            protected_launcher_instance_identity: identity('9'),
+            systemd_invocation_identity: identity('a'),
+            systemd_scope_identity: identity('b'),
+            cgroup_identity: identity('0'),
+            child_process_identity: identity('c'),
+            principal_mapping_identity: identity('d'),
+            process_posture_identity: identity('e'),
+            implementation_subject_identity: identity('f'),
+            descriptors,
+        };
+        capability.identity = protected_launcher_capability_v1_identity(&capability)
+            .expect("protected launcher capability identity");
+        capability
+    }
+
     #[test]
     fn framing_is_bounded_and_exact() {
         let payload = br#"{"message_kind":"challenge_request"}"#;
@@ -3543,6 +4035,608 @@ mod tests {
         assert_eq!(
             decode_frame(&[0, 0, 0, 2, b'{']),
             Err(ProtocolError::IncompleteFrame)
+        );
+    }
+
+    #[test]
+    fn protected_launcher_capability_is_closed_canonical_and_content_addressed() {
+        let capability = protected_capability();
+        assert_eq!(
+            sha256_identity(
+                &serde_jcs::to_vec(&capability.descriptors[0]).expect("descriptor JCS")
+            ),
+            "sha256:a2a4518f22a1ce63ea8c9520b963fa9d54a6f92bab458d27d8a40cb7ef776a1e"
+        );
+        assert_eq!(
+            sha256_identity(&serde_jcs::to_vec(&capability).expect("capability JCS")),
+            "sha256:d4489737bb58897aad5c42525cb3f7a3dc7e68caae6622860d27b3dfb8c0705c"
+        );
+        assert_eq!(
+            capability.descriptors[0].identity,
+            "sha256:7a9488e0effeb2b791c2ad184d8f94e4b6644f6fb3fee648dcd9423a701ff3a7"
+        );
+        assert_eq!(
+            capability.identity,
+            "sha256:a261408212f7f0da88b1ae529c7b16f55c2dd8cf9baf71480d85e516c60fdad0"
+        );
+        let descriptor_json =
+            serde_json::to_value(&capability.descriptors[0]).expect("descriptor JSON");
+        assert_eq!(descriptor_json["role"], "launcher_session_socket");
+        assert_eq!(descriptor_json["kind"], "unix_stream_socket");
+        assert_eq!(descriptor_json["access"], "read_write");
+        assert!(descriptor_json.get("content_identity").is_none());
+        assert_eq!(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                VERIFIER_STORE_BYTES,
+            )
+            .expect("verifier store identity"),
+            "sha256:e56e26fb0be37f27cdc15d0fc10a682a3a7492cf4e1c8bb04481bcb8b9db9b85"
+        );
+        assert_eq!(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::BindingStore,
+                BINDING_STORE_BYTES,
+            )
+            .expect("binding store identity"),
+            "sha256:c89a3a030fa0549e6df7ba28e7a475efdbd155fcc601ea6357dae83a2d8613c8"
+        );
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&capability)
+                .expect("stable capability identity"),
+            capability.identity
+        );
+
+        let mut reordered = capability.clone();
+        reordered.descriptors.reverse();
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&reordered)
+                .expect("descriptor order is not semantic"),
+            capability.identity
+        );
+
+        let mut changed_store = capability.clone();
+        let verifier = changed_store
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore)
+            .expect("verifier descriptor");
+        verifier.size += 1;
+        verifier.identity = protected_launcher_descriptor_v1_identity(verifier)
+            .expect("changed verifier descriptor identity");
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_store)
+                .expect("changed store capability identity"),
+            capability.identity
+        );
+
+        let mut changed_request = capability.clone();
+        changed_request.launcher_request_identity = format!("sha256:{}", "0".repeat(64));
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_request)
+                .expect("changed request capability identity"),
+            capability.identity
+        );
+
+        let mut changed_subject = capability.clone();
+        changed_subject.implementation_subject_identity = format!("sha256:{}", "0".repeat(64));
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_subject)
+                .expect("changed subject capability identity"),
+            capability.identity
+        );
+
+        let mut duplicate = capability.clone();
+        duplicate.descriptors[2] = duplicate.descriptors[1].clone();
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&duplicate),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut missing = capability.clone();
+        missing.descriptors.pop();
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&missing),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut unknown_capability_field =
+            serde_json::to_value(&capability).expect("capability JSON");
+        unknown_capability_field["provider_token"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityV1>(unknown_capability_field)
+                .is_err()
+        );
+        let mut unknown_descriptor_field =
+            serde_json::to_value(&capability.descriptors[0]).expect("descriptor JSON");
+        unknown_descriptor_field["path"] = serde_json::Value::String("/forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherDescriptorV1>(unknown_descriptor_field)
+                .is_err()
+        );
+
+        let mut wrong_cgroup = capability.clone();
+        wrong_cgroup.cgroup_identity = format!("sha256:{}", "1".repeat(64));
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&wrong_cgroup)
+                .expect("changed cgroup identity remains structurally valid"),
+            capability.identity
+        );
+
+        let mut non_root_service = capability.clone();
+        non_root_service.service_uid = 1000;
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&non_root_service),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut writable_store = capability;
+        let binding = writable_store
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore)
+            .expect("binding descriptor");
+        binding.access = ProtectedLauncherDescriptorAccessV1::ReadWrite;
+        assert_eq!(
+            protected_launcher_descriptor_v1_identity(binding),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&writable_store),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn protected_launcher_capability_binds_every_private_identity_without_secret_material() {
+        let capability = protected_capability();
+        let original_identity = capability.identity.clone();
+        let substituted_identity = format!("sha256:{}", "0".repeat(64));
+        for field in [
+            "launcher_request_identity",
+            "launcher_executable_identity",
+            "launcher_configuration_identity",
+            "launcher_service_binding_identity",
+            "launcher_profile_identity",
+            "runner_administrator_identity",
+            "invocation_nonce_identity",
+            "boot_identity",
+            "protected_launcher_instance_identity",
+            "systemd_invocation_identity",
+            "systemd_scope_identity",
+            "child_process_identity",
+            "principal_mapping_identity",
+            "process_posture_identity",
+            "implementation_subject_identity",
+        ] {
+            let mut value = serde_json::to_value(&capability).expect("capability JSON");
+            value[field] = serde_json::Value::String(substituted_identity.clone());
+            let changed: ProtectedLauncherCapabilityV1 =
+                serde_json::from_value(value).expect("changed capability");
+            assert_ne!(
+                protected_launcher_capability_v1_identity(&changed)
+                    .expect("changed capability identity"),
+                original_identity,
+                "{field} must participate in capability identity"
+            );
+        }
+
+        let mut changed_cgroup = capability.clone();
+        let cgroup = changed_cgroup
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+            })
+            .expect("cgroup descriptor");
+        cgroup.inode += 1;
+        cgroup.identity = protected_launcher_descriptor_v1_identity(cgroup)
+            .expect("changed cgroup descriptor identity");
+        changed_cgroup.cgroup_identity = substituted_identity;
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_cgroup)
+                .expect("changed cgroup capability identity"),
+            original_identity
+        );
+
+        let value = serde_json::to_value(&capability).expect("capability JSON");
+        let keys = value
+            .as_object()
+            .expect("capability object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from([
+                "boot_identity",
+                "cgroup_identity",
+                "child_process_identity",
+                "descriptors",
+                "identity",
+                "implementation_subject_identity",
+                "invocation_nonce_identity",
+                "launcher_configuration_identity",
+                "launcher_executable_identity",
+                "launcher_profile_identity",
+                "launcher_request_identity",
+                "launcher_service_binding_identity",
+                "message_kind",
+                "principal_mapping_identity",
+                "process_posture_identity",
+                "protected_launcher_instance_identity",
+                "protocol_version",
+                "runner_administrator_identity",
+                "schema_version",
+                "service_gid",
+                "service_uid",
+                "systemd_invocation_identity",
+                "systemd_scope_identity",
+            ])
+        );
+        let descriptor_keys = value["descriptors"]
+            .as_array()
+            .expect("descriptor array")
+            .iter()
+            .flat_map(|descriptor| {
+                descriptor
+                    .as_object()
+                    .expect("descriptor object")
+                    .keys()
+                    .map(String::as_str)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            descriptor_keys,
+            std::collections::BTreeSet::from([
+                "access",
+                "content_identity",
+                "device",
+                "identity",
+                "inode",
+                "kind",
+                "mode",
+                "owner_gid",
+                "owner_uid",
+                "role",
+                "schema_version",
+                "size",
+            ])
+        );
+        let encoded = serde_json::to_vec(&value).expect("capability bytes");
+        encode_frame(&encoded).expect("bounded capability frame");
+        let encoded = String::from_utf8(encoded).expect("capability JSON is UTF-8");
+        for prohibited in [
+            "token",
+            "provider",
+            "secret",
+            "path",
+            "credential",
+            "handle",
+            "verifiers",
+            "bindings",
+        ] {
+            assert!(
+                !encoded.contains(prohibited),
+                "capability must not carry {prohibited} material"
+            );
+        }
+    }
+
+    #[test]
+    fn protected_launcher_capability_reconciles_canonical_launcher_evidence() {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let principal = |uid: u32, gid: u32| UnixPrincipalIdentity {
+            real_uid: uid,
+            effective_uid: uid,
+            saved_uid: uid,
+            filesystem_uid: uid,
+            real_gid: gid,
+            effective_gid: gid,
+            saved_gid: gid,
+            filesystem_gid: gid,
+        };
+        let request = LauncherInvocationRequestV1 {
+            message_kind: LAUNCHER_INVOCATION_REQUEST.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            authority_id: "secret-delivery".into(),
+            ota_arguments: vec!["run".into(), "publish".into()],
+            repository_path: "/srv/ota/repository".into(),
+        };
+        let request_identity =
+            launcher_invocation_request_identity(&request).expect("launcher request identity");
+        let launcher_configuration_identity = identity('3');
+        let job_profile = systemd_job_principal_profile_v2();
+        let job_profile_identity =
+            systemd_job_principal_profile_identity(&job_profile).expect("job profile identity");
+        let mut principal_mapping = LauncherPrincipalMappingV1 {
+            schema_version: 1,
+            identity: String::new(),
+            job_peer: principal(1001, 1001),
+            execution: principal(1002, 1002),
+            job_principal_profile_identity: job_profile_identity.clone(),
+            launcher_session_binding_identity: launcher_configuration_identity.clone(),
+        };
+        principal_mapping.identity = launcher_principal_mapping_identity(&principal_mapping)
+            .expect("principal mapping identity");
+        let mut working_directory = LauncherWorkingDirectoryV1 {
+            schema_version: 1,
+            identity: String::new(),
+            logical_path: request.repository_path.clone(),
+            device: 31,
+            inode: 3100,
+        };
+        working_directory.identity = launcher_working_directory_identity(&working_directory)
+            .expect("working-directory identity");
+        let mut child = LauncherChildProcessV1 {
+            schema_version: 1,
+            identity: String::new(),
+            invocation_id: "secret-delivery-1".into(),
+            request_identity: request_identity.clone(),
+            pid: 4242,
+            process_start_time_identity: identity('7'),
+            ota_binary_identity: identity('2'),
+            principal_mapping_identity: principal_mapping.identity.clone(),
+            working_directory_identity: working_directory.identity,
+        };
+        child.identity = launcher_child_process_identity(&child).expect("child identity");
+        let mut scope = LauncherSystemdScopeV1 {
+            schema_version: 1,
+            identity: String::new(),
+            invocation_id: child.invocation_id.clone(),
+            request_identity: request_identity.clone(),
+            child_identity: child.identity.clone(),
+            child_pid: child.pid,
+            unit_name: "ota-authority-invocation-0123456789abcdef.scope".into(),
+            unit_object_path:
+                "/org/freedesktop/systemd1/unit/ota_2dauthority_2dinvocation_2d0123456789abcdef_2escope"
+                    .into(),
+            slice: "ota-authority-invocations.slice".into(),
+            control_group: "/ota-authority-invocations.slice/ota-authority-invocation-0123456789abcdef.scope"
+                .into(),
+            delegate: false,
+            kill_mode: "control-group".into(),
+            collect_mode: "inactive-or-failed".into(),
+        };
+        scope.identity = launcher_systemd_scope_identity(&scope).expect("scope identity");
+        let mut process_posture = OtaProcessPostureV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: OTA_PROCESS_POSTURE.into(),
+            pid: child.pid,
+            process_start_time_identity: child.process_start_time_identity.clone(),
+            ota_binary_identity: child.ota_binary_identity.clone(),
+            no_new_privs: true,
+            dumpable: 0,
+            ptracer_clear_applied: true,
+            principal_mapping_identity: principal_mapping.identity.clone(),
+        };
+        process_posture.identity =
+            ota_process_posture_identity(&process_posture).expect("process posture identity");
+        let launcher_profile = systemd_launcher_profile_v3();
+        let launcher_profile_identity = systemd_launcher_profile_identity(&launcher_profile)
+            .expect("launcher profile identity");
+        let mut foundation = SystemdProtectedLauncherInstanceEvidenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            adapter: SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1.into(),
+            principal_mapping: principal_mapping.clone(),
+            process_posture: process_posture.clone(),
+            systemd_launcher_profile_identity: launcher_profile_identity.clone(),
+            systemd_job_principal_profile_identity: job_profile_identity,
+            launcher_session_binding_identity: launcher_configuration_identity.clone(),
+            systemd_invocation_identity: scope.identity.clone(),
+            working_directory_identity: child.working_directory_identity.clone(),
+            child_process_identity: child.identity.clone(),
+        };
+        foundation.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(&foundation)
+                .expect("launcher foundation identity");
+        let mut launcher_instance = SystemdProtectedLauncherInstanceEvidenceV2 {
+            schema_version: 3,
+            identity: String::new(),
+            instance_v1: foundation,
+            launcher_observations: launcher_profile
+                .evidence_sources
+                .into_iter()
+                .map(|source| SystemdLauncherObservation {
+                    source,
+                    state: RuntimeBoundaryObservationState::Verified,
+                    reason_code: "verified_by_systemd_protected_launcher".into(),
+                    evidence_identity: Some(identity('8')),
+                })
+                .collect(),
+            job_principal_observations: job_profile
+                .requirements
+                .into_iter()
+                .map(|required| SystemdJobPrincipalObservation {
+                    requirement: required.requirement,
+                    evidence_methods: required.evidence_methods,
+                    state: RuntimeBoundaryObservationState::Verified,
+                    reason_code: "verified_by_systemd_protected_launcher".into(),
+                    evidence_identity: Some(identity('9')),
+                })
+                .collect(),
+        };
+        launcher_instance.identity =
+            systemd_protected_launcher_instance_v2_identity(&launcher_instance)
+                .expect("complete launcher instance identity");
+
+        let descriptors = vec![
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket, 1),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::VerifierStore, 2),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::BindingStore, 3),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::InvocationCgroup, 4),
+        ];
+        let cgroup_descriptor = &descriptors[3];
+        let cgroup_identity = protected_launcher_cgroup_v1_identity(&scope, cgroup_descriptor)
+            .expect("cgroup identity");
+        assert_eq!(
+            cgroup_identity,
+            "sha256:6a970aa7da9df5e80123b75ff98418340b0ab3d21983a8068f22502c0ed99a89"
+        );
+        let runner_administrator_identity = identity('6');
+        let invocation_nonce_identity = identity('a');
+        let boot_identity = identity('b');
+        let implementation_subject_identity = identity('c');
+        let launcher_service_binding_identity = identity('4');
+        let mut capability = ProtectedLauncherCapabilityV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            launcher_request_identity: request_identity,
+            launcher_executable_identity: child.ota_binary_identity.clone(),
+            launcher_configuration_identity: launcher_configuration_identity.clone(),
+            launcher_service_binding_identity: launcher_service_binding_identity.clone(),
+            launcher_profile_identity: launcher_profile_identity.clone(),
+            runner_administrator_identity: runner_administrator_identity.clone(),
+            service_uid: 0,
+            service_gid: 0,
+            invocation_nonce_identity: invocation_nonce_identity.clone(),
+            boot_identity: boot_identity.clone(),
+            protected_launcher_instance_identity: launcher_instance.identity.clone(),
+            systemd_invocation_identity: scope.identity.clone(),
+            systemd_scope_identity: scope.identity.clone(),
+            cgroup_identity,
+            child_process_identity: child.identity.clone(),
+            principal_mapping_identity: principal_mapping.identity.clone(),
+            process_posture_identity: process_posture.identity.clone(),
+            implementation_subject_identity: implementation_subject_identity.clone(),
+            descriptors: descriptors.clone(),
+        };
+        capability.identity =
+            protected_launcher_capability_v1_identity(&capability).expect("capability identity");
+        let evidence = ProtectedLauncherCapabilityEvidenceV1 {
+            request: &request,
+            child: &child,
+            scope: &scope,
+            principal_mapping: &principal_mapping,
+            process_posture: &process_posture,
+            launcher_instance: &launcher_instance,
+            launcher_executable_identity: child.ota_binary_identity.as_str(),
+            launcher_configuration_identity: launcher_configuration_identity.as_str(),
+            launcher_service_binding_identity: launcher_service_binding_identity.as_str(),
+            launcher_profile_identity: launcher_profile_identity.as_str(),
+            runner_administrator_identity: runner_administrator_identity.as_str(),
+            service_uid: 0,
+            service_gid: 0,
+            invocation_nonce_identity: invocation_nonce_identity.as_str(),
+            boot_identity: boot_identity.as_str(),
+            implementation_subject_identity: implementation_subject_identity.as_str(),
+            observed_descriptors: descriptors.as_slice(),
+            verifier_store_bytes: VERIFIER_STORE_BYTES,
+            binding_store_bytes: BINDING_STORE_BYTES,
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&capability, &evidence),
+            Ok(())
+        );
+
+        let mut forged_child = child.clone();
+        forged_child.principal_mapping_identity = identity('0');
+        forged_child.identity =
+            launcher_child_process_identity(&forged_child).expect("forged child identity");
+        let mut forged_scope = scope.clone();
+        forged_scope.child_identity = forged_child.identity.clone();
+        forged_scope.identity =
+            launcher_systemd_scope_identity(&forged_scope).expect("forged scope identity");
+        let mut forged_instance = launcher_instance.clone();
+        forged_instance.instance_v1.child_process_identity = forged_child.identity.clone();
+        forged_instance.instance_v1.systemd_invocation_identity = forged_scope.identity.clone();
+        forged_instance.instance_v1.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(
+                &forged_instance.instance_v1,
+            )
+            .expect("forged launcher foundation identity");
+        forged_instance.identity =
+            systemd_protected_launcher_instance_v2_identity(&forged_instance)
+                .expect("forged launcher instance identity");
+        let mut forged_mapping_capability = capability.clone();
+        forged_mapping_capability.child_process_identity = forged_child.identity.clone();
+        forged_mapping_capability.systemd_invocation_identity = forged_scope.identity.clone();
+        forged_mapping_capability.systemd_scope_identity = forged_scope.identity.clone();
+        forged_mapping_capability.cgroup_identity =
+            protected_launcher_cgroup_v1_identity(&forged_scope, cgroup_descriptor)
+                .expect("forged cgroup identity");
+        forged_mapping_capability.protected_launcher_instance_identity =
+            forged_instance.identity.clone();
+        forged_mapping_capability.identity =
+            protected_launcher_capability_v1_identity(&forged_mapping_capability)
+                .expect("self-consistent forged capability identity");
+        let forged_mapping_evidence = ProtectedLauncherCapabilityEvidenceV1 {
+            child: &forged_child,
+            scope: &forged_scope,
+            launcher_instance: &forged_instance,
+            ..evidence
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(
+                &forged_mapping_capability,
+                &forged_mapping_evidence,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut substituted_cgroup = capability.clone();
+        substituted_cgroup.cgroup_identity = identity('d');
+        substituted_cgroup.identity =
+            protected_launcher_capability_v1_identity(&substituted_cgroup)
+                .expect("self-consistent substituted capability");
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&substituted_cgroup, &evidence),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut swapped_stores = capability.clone();
+        let verifier_index = swapped_stores
+            .descriptors
+            .iter()
+            .position(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore
+            })
+            .expect("verifier descriptor");
+        let binding_index = swapped_stores
+            .descriptors
+            .iter()
+            .position(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore
+            })
+            .expect("binding descriptor");
+        swapped_stores.descriptors[verifier_index].role =
+            ProtectedLauncherDescriptorRoleV1::BindingStore;
+        swapped_stores.descriptors[binding_index].role =
+            ProtectedLauncherDescriptorRoleV1::VerifierStore;
+        for descriptor in &mut swapped_stores.descriptors {
+            descriptor.identity = protected_launcher_descriptor_v1_identity(descriptor)
+                .expect("self-consistent swapped descriptor");
+        }
+        swapped_stores.identity = protected_launcher_capability_v1_identity(&swapped_stores)
+            .expect("self-consistent swapped capability");
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&swapped_stores, &evidence),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut aliased_stores = capability;
+        let verifier = aliased_stores
+            .descriptors
+            .iter()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore)
+            .expect("verifier descriptor")
+            .clone();
+        let binding = aliased_stores
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore)
+            .expect("binding descriptor");
+        binding.device = verifier.device;
+        binding.inode = verifier.inode;
+        binding.identity = protected_launcher_descriptor_v1_identity(binding)
+            .expect("aliased descriptor identity");
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&aliased_stores),
+            Err(ProtocolError::InvalidRecord)
         );
     }
 

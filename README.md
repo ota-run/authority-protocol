@@ -40,6 +40,9 @@ This repository owns:
 - additive runtime-boundary attestation v2 types and canonical protected-launcher profiles;
 - immutable principal-mapping, Ota process-posture, and systemd launcher-profile records used by
   the production protected-launcher adapter;
+- an additive protected-launcher capability record binding one exact request, launcher
+  installation, root service, systemd/cgroup invocation, unprivileged Ota subject, and the closed
+  retained-descriptor set without carrying paths, file content, tokens, or provider responses;
 - the bounded Linux systemd-launcher client/service request, output, and terminal frames;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
@@ -259,6 +262,16 @@ adapter can execute:
 These definitions do not implement systemd, inspect a host, hold an attestor key, or create a
 provider claim. Core and authority-launcher must pin the same immutable protocol revision and
 independently verify their respective boundaries before the adapter can be enabled.
+
+`ProtectedLauncherCapabilityV1` is an additive protocol foundation for that independent
+verification. It canonicalizes exactly one launcher-session socket, verifier store, binding store,
+and invocation-cgroup descriptor; binds each store to a role-specific protected content identity;
+and derives the cgroup identity from the exact retained descriptor and systemd scope. It is not
+authority, does not prove that the descriptors were securely opened, and does not activate OIDC,
+provider contact, secret delivery, or execution. This protocol revision includes a semantic
+reconciliation API over independently observed launcher records and store bytes. No released or
+current authority-launcher emits the record, and no released or current Core/runtime consumes it.
+Those implementations and their hosted proof remain separate subsequent work.
 
 ### Systemd launcher service frames
 
