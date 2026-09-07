@@ -1891,7 +1891,7 @@ pub fn launcher_systemd_scope_identity(
         || !scope.unit_name.ends_with(".scope")
         || !is_absolute_bounded_path(scope.unit_object_path.as_str(), 1024)
         || scope.slice != "ota-authority-invocations.slice"
-        || !is_absolute_bounded_path(scope.control_group.as_str(), 1024)
+        || !is_canonical_absolute_bounded_path(scope.control_group.as_str(), 1024)
         || scope.delegate
         || scope.kill_mode != "control-group"
         || scope.collect_mode != "inactive-or-failed"
@@ -1928,6 +1928,7 @@ pub fn protected_launcher_descriptor_v1_identity(
                 && descriptor.access == ProtectedLauncherDescriptorAccessV1::ReadOnly
                 && descriptor.owner_uid == 0
                 && descriptor.owner_gid == 0
+                && descriptor.mode & 0o022 == 0
         }
     };
     if descriptor.schema_version != 1
@@ -2950,6 +2951,17 @@ fn is_absolute_bounded_path(value: &str, maximum_bytes: usize) -> bool {
         && value.starts_with('/')
         && !value.contains('\0')
         && !value.split('/').any(|component| component == "..")
+}
+
+fn is_canonical_absolute_bounded_path(value: &str, maximum_bytes: usize) -> bool {
+    is_absolute_bounded_path(value, maximum_bytes)
+        && value != "/"
+        && !value.starts_with("//")
+        && !value.ends_with('/')
+        && !value
+            .split('/')
+            .skip(1)
+            .any(|component| component.is_empty() || component == ".")
 }
 
 fn has_duplicate_strings(values: &[String]) -> bool {
@@ -4618,6 +4630,21 @@ mod tests {
             Err(ProtocolError::InvalidRecord)
         );
 
+        let cgroup = capability
+            .descriptors
+            .iter()
+            .find(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+            })
+            .expect("cgroup descriptor")
+            .clone();
+        let mut writable_cgroup = cgroup;
+        writable_cgroup.mode = 0o777;
+        assert_eq!(
+            protected_launcher_descriptor_v1_identity(&writable_cgroup),
+            Err(ProtocolError::InvalidRecord)
+        );
+
         let mut aliased_stores = capability;
         let verifier = aliased_stores
             .descriptors
@@ -4855,6 +4882,18 @@ mod tests {
             launcher_systemd_scope_identity(&changed_scope).expect("changed scope identity"),
             scope.identity
         );
+        for alias in [
+            format!("//{}/{}", scope.slice, scope.unit_name),
+            format!("/{}/./{}", scope.slice, scope.unit_name),
+            format!("/{}/{}/", scope.slice, scope.unit_name),
+        ] {
+            let mut aliased_scope = scope.clone();
+            aliased_scope.control_group = alias;
+            assert_eq!(
+                launcher_systemd_scope_identity(&aliased_scope),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
         let mut invalid_scope = scope;
         invalid_scope.delegate = true;
         assert_eq!(
