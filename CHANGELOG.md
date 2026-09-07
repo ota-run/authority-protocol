@@ -26,6 +26,13 @@
 
 ## Unreleased
 
+- Add the closed protected-capability observation challenge, public projection, and administrator-
+  installed verifier records. The challenge binds one fresh workflow invocation with a five-minute
+  maximum lifetime. The projection hashes an unsigned JCS payload and signs its identity under a
+  separate Ed25519 domain; the verifier record binds the exact public key, key usage, and signature
+  domain. These records expose no raw protected-capability identity and grant no provider authority,
+  contact, delivery, execution approval, receipt, or assurance.
+
 - Reconcile the README with the implemented protocol boundary: remove stale preview/planned
   wording, distinguish versioned conformance-tested source from a stable crate release, and show
   the protected attestation producer separately from broker authorization in the wire sequence.

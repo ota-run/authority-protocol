@@ -43,15 +43,21 @@ This repository owns:
 - an additive protected-launcher capability record binding one exact request, launcher
   installation, root service, systemd/cgroup invocation, unprivileged Ota subject, and the closed
   retained-descriptor set without carrying paths, file content, tokens, or provider responses;
+- closed challenge, public capability-observation projection, and administrator-installed verifier
+  records that bind one fresh workflow invocation without publishing the raw protected-capability
+  identity or its transitive private correlation inputs;
 - the bounded Linux systemd-launcher client/service request, output, and terminal frames;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
 - compatibility and adversarial conformance tests.
 
-It does not own repository contracts, semantic-scope derivation, admission policy, signing keys,
-approval workflows, broker persistence, transport credentials, execution, receipt creation,
-protected archive storage, or semantic archive verification. Those remain with Ota Core, the
-authority launcher, and the chosen broker implementation.
+It defines canonical projection signature bytes but does not own repository contracts,
+semantic-scope derivation, admission policy, signing keys, challenge replay persistence, signature
+verification policy, approval workflows, broker persistence, transport credentials, execution,
+receipt creation, protected archive storage, or semantic archive verification. Those remain with
+Ota Core, the authority launcher, and the chosen broker implementation. A structurally valid public
+projection is neither authority nor evidence of provider contact, delivery, execution approval, or
+cleanup.
 
 ## Wire sequence
 

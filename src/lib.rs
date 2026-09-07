@@ -25,6 +25,7 @@
 //! This crate deliberately contains no authority-selection, trust-root, approval, persistence,
 //! execution, receipt, or archive policy.
 
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -78,6 +79,14 @@ pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
 pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
 pub const PROTECTED_LAUNCHER_CAPABILITY: &str = "protected_launcher_capability";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE: &str =
+    "protected_launcher_capability_observation_challenge";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION: &str =
+    "protected_launcher_capability_observation";
+pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER: &str =
+    "protected_launcher_capability_projection_verifier";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1: &str =
+    "protected_launcher_capability_observation_projection";
 pub const LAUNCHER_STARTUP_CONTINUATION: &str = "launcher_startup_continuation";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST: &str = "launcher_attestation_signing_request";
 pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE: &str = "launcher_attestation_signing_response";
@@ -146,6 +155,18 @@ pub const PROTECTED_LAUNCHER_CGROUP_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.protected-cgroup.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.protected-capability.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_NONCE_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-nonce.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-challenge.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-projection.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-signature.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-projection-verifier.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_KEY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-projection-key.v1\0";
 pub const LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.startup-continuation.v1\0";
 pub const AUTHORIZATION_DECISION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
@@ -428,6 +449,65 @@ pub struct ProtectedLauncherCapabilityEvidenceV1<'a> {
     pub observed_descriptors: &'a [ProtectedLauncherDescriptorV1],
     pub verifier_store_bytes: &'a [u8],
     pub binding_store_bytes: &'a [u8],
+}
+
+/// One fresh Core-owned public challenge for a protected capability observation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationChallengeV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub workflow_run_id: String,
+    pub workflow_run_attempt: String,
+    pub workflow_reference: String,
+    pub nonce_commitment: String,
+    pub issued_at_unix_seconds: u64,
+    pub expires_at_unix_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationTargetV1 {
+    pub environment: String,
+    pub os: String,
+    pub architecture: String,
+}
+
+/// Exact unsigned public payload derived by the root-owned launcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationProjectionPayloadV1 {
+    pub schema_version: u32,
+    pub evidence_kind: String,
+    pub challenge_identity: String,
+    pub derivation: String,
+    pub target: ProtectedLauncherCapabilityObservationTargetV1,
+    pub capability_class: String,
+    pub runner_version: String,
+    pub signing_key_identity: String,
+}
+
+/// Public signed envelope. The protected capability identity never enters this record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationProjectionV1 {
+    pub payload: ProtectedLauncherCapabilityObservationProjectionPayloadV1,
+    pub projection_identity: String,
+    pub signature: String,
+}
+
+/// Administrator-installed public verifier for exactly one projection protocol.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityProjectionVerifierV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub public_key: String,
+    pub key_identity: String,
+    pub key_usage: String,
+    pub signature_domain: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -2070,6 +2150,147 @@ pub fn protected_launcher_capability_v1_identity(
     canonical.identity.clear();
     canonical.descriptors = descriptors;
     message_identity(PROTECTED_LAUNCHER_CAPABILITY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn protected_launcher_capability_observation_nonce_commitment_v1(
+    nonce: &[u8],
+) -> Result<String, ProtocolError> {
+    if nonce.len() != 32 {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_NONCE_DOMAIN_V1,
+        nonce,
+    )))
+}
+
+pub fn protected_launcher_capability_observation_challenge_v1_identity(
+    challenge: &ProtectedLauncherCapabilityObservationChallengeV1,
+) -> Result<String, ProtocolError> {
+    if challenge.schema_version != 1
+        || challenge.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE
+        || !is_canonical_positive_decimal(&challenge.workflow_run_id)
+        || !is_canonical_positive_decimal(&challenge.workflow_run_attempt)
+        || !is_canonical_workflow_reference(&challenge.workflow_reference)
+        || !is_sha256_identity(&challenge.nonce_commitment)
+        || challenge.issued_at_unix_seconds == 0
+        || challenge.expires_at_unix_seconds <= challenge.issued_at_unix_seconds
+        || challenge.expires_at_unix_seconds - challenge.issued_at_unix_seconds > 300
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = challenge.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_observation_challenge_v1(
+    challenge: &ProtectedLauncherCapabilityObservationChallengeV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if challenge.identity
+        != protected_launcher_capability_observation_challenge_v1_identity(challenge)?
+        || observed_at_unix_seconds < challenge.issued_at_unix_seconds
+        || observed_at_unix_seconds > challenge.expires_at_unix_seconds
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_capability_projection_key_identity_v1(
+    public_key: &str,
+) -> Result<String, ProtocolError> {
+    if !is_canonical_ed25519_public_key(public_key) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_KEY_IDENTITY_DOMAIN_V1,
+        &public_key,
+    )
+}
+
+pub fn protected_launcher_capability_observation_projection_v1_identity(
+    payload: &ProtectedLauncherCapabilityObservationProjectionPayloadV1,
+) -> Result<String, ProtocolError> {
+    if payload.schema_version != 1
+        || payload.evidence_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION
+        || !is_sha256_identity(&payload.challenge_identity)
+        || payload.derivation != "verified"
+        || payload.target.environment != "self_hosted"
+        || payload.target.os != "linux"
+        || payload.target.architecture != "x64"
+        || payload.capability_class != "systemd_protected_launcher_v3"
+        || !is_canonical_semver(&payload.runner_version)
+        || !is_sha256_identity(&payload.signing_key_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_IDENTITY_DOMAIN_V1,
+        payload,
+    )
+}
+
+pub fn protected_launcher_capability_observation_signature_message_v1(
+    projection_identity: &str,
+) -> Result<Vec<u8>, ProtocolError> {
+    if !is_sha256_identity(projection_identity) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(domain_separated(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1,
+        projection_identity.as_bytes(),
+    ))
+}
+
+pub fn validate_protected_launcher_capability_observation_projection_v1(
+    projection: &ProtectedLauncherCapabilityObservationProjectionV1,
+) -> Result<(), ProtocolError> {
+    if projection.projection_identity
+        != protected_launcher_capability_observation_projection_v1_identity(&projection.payload)?
+        || !is_canonical_ed25519_signature(&projection.signature)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_capability_projection_verifier_v1_identity(
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+) -> Result<String, ProtocolError> {
+    let signature_domain =
+        std::str::from_utf8(PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    if verifier.schema_version != 1
+        || verifier.record_kind != PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER
+        || !is_canonical_ed25519_public_key(&verifier.public_key)
+        || verifier.key_identity
+            != protected_launcher_capability_projection_key_identity_v1(&verifier.public_key)?
+        || verifier.key_usage != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1
+        || verifier.signature_domain != signature_domain
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = verifier.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_projection_verifier_v1(
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+) -> Result<(), ProtocolError> {
+    if verifier.identity != protected_launcher_capability_projection_verifier_v1_identity(verifier)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
 }
 
 fn canonical_protected_launcher_descriptors(
@@ -3894,6 +4115,146 @@ fn is_sha256_identity(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn is_base64url_no_pad(value: &str, exact_len: usize) -> bool {
+    value.len() == exact_len
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn is_canonical_ed25519_public_key(value: &str) -> bool {
+    is_base64url_no_pad(value, 43)
+        && value.as_bytes().last().is_some_and(|byte| {
+            matches!(
+                byte,
+                b'A' | b'E'
+                    | b'I'
+                    | b'M'
+                    | b'Q'
+                    | b'U'
+                    | b'Y'
+                    | b'c'
+                    | b'g'
+                    | b'k'
+                    | b'o'
+                    | b's'
+                    | b'w'
+                    | b'0'
+                    | b'4'
+                    | b'8'
+            )
+        })
+}
+
+fn is_canonical_ed25519_signature(value: &str) -> bool {
+    is_base64url_no_pad(value, 86)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| matches!(byte, b'A' | b'Q' | b'g' | b'w'))
+}
+
+fn is_canonical_positive_decimal(value: &str) -> bool {
+    value
+        .parse::<u64>()
+        .is_ok_and(|parsed| parsed > 0 && value == parsed.to_string())
+}
+
+fn is_canonical_semver(value: &str) -> bool {
+    value.len() <= 128 && Version::parse(value).is_ok_and(|parsed| parsed.to_string() == value)
+}
+
+fn is_canonical_workflow_reference(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 512
+        || !value.is_ascii()
+        || value
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return false;
+    }
+    let Some((workflow_path, git_ref)) = value.split_once('@') else {
+        return false;
+    };
+    if git_ref.contains('@') {
+        return false;
+    }
+    let Some(ref_name) = git_ref
+        .strip_prefix("refs/heads/")
+        .or_else(|| git_ref.strip_prefix("refs/tags/"))
+    else {
+        return false;
+    };
+    if ref_name.is_empty()
+        || ref_name.starts_with('.')
+        || ref_name.ends_with('.')
+        || ref_name.contains("..")
+        || ref_name.contains("@{")
+        || !ref_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'))
+        || ref_name.split('/').any(|component| {
+            component.is_empty()
+                || component.starts_with('.')
+                || matches!(component, "." | "..")
+                || component.ends_with(".lock")
+        })
+    {
+        return false;
+    }
+    let segments = workflow_path.split('/').collect::<Vec<_>>();
+    segments.len() == 5
+        && is_canonical_github_owner(segments[0])
+        && is_canonical_github_repository(segments[1])
+        && segments[2] == ".github"
+        && segments[3] == "workflows"
+        && segments[4..].iter().all(|segment| {
+            !segment.is_empty()
+                && !segment.starts_with('.')
+                && *segment != "."
+                && *segment != ".."
+                && segment.len() <= 128
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
+        && (workflow_path.ends_with(".yml") || workflow_path.ends_with(".yaml"))
+        && !git_ref.ends_with('/')
+}
+
+fn is_canonical_github_owner(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 39
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+}
+
+fn is_canonical_github_repository(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 100
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+}
+
 fn is_reason_code(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -3995,6 +4356,374 @@ mod tests {
         descriptor.identity = protected_launcher_descriptor_v1_identity(&descriptor)
             .expect("protected descriptor identity");
         descriptor
+    }
+
+    fn capability_observation_challenge() -> ProtectedLauncherCapabilityObservationChallengeV1 {
+        let nonce = [7_u8; 32];
+        let mut challenge = ProtectedLauncherCapabilityObservationChallengeV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE.into(),
+            identity: String::new(),
+            workflow_run_id: "34153231585".into(),
+            workflow_run_attempt: "1".into(),
+            workflow_reference:
+                "ota-run/ota/.github/workflows/secret-delivery-oidc-endpoint-evidence.yml@refs/heads/1.6.28-implementation"
+                    .into(),
+            nonce_commitment:
+                protected_launcher_capability_observation_nonce_commitment_v1(&nonce)
+                    .expect("nonce commitment"),
+            issued_at_unix_seconds: 1_788_800_000,
+            expires_at_unix_seconds: 1_788_800_300,
+        };
+        challenge.identity =
+            protected_launcher_capability_observation_challenge_v1_identity(&challenge)
+                .expect("challenge identity");
+        challenge
+    }
+
+    fn capability_projection_verifier() -> ProtectedLauncherCapabilityProjectionVerifierV1 {
+        let public_key = "A".repeat(43);
+        let mut verifier = ProtectedLauncherCapabilityProjectionVerifierV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER.into(),
+            identity: String::new(),
+            key_identity: protected_launcher_capability_projection_key_identity_v1(&public_key)
+                .expect("key identity"),
+            public_key,
+            key_usage: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1.into(),
+            signature_domain: std::str::from_utf8(
+                PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1,
+            )
+            .expect("signature domain")
+            .into(),
+        };
+        verifier.identity =
+            protected_launcher_capability_projection_verifier_v1_identity(&verifier)
+                .expect("verifier identity");
+        verifier
+    }
+
+    fn capability_observation_projection() -> ProtectedLauncherCapabilityObservationProjectionV1 {
+        let challenge = capability_observation_challenge();
+        let verifier = capability_projection_verifier();
+        let payload = ProtectedLauncherCapabilityObservationProjectionPayloadV1 {
+            schema_version: 1,
+            evidence_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION.into(),
+            challenge_identity: challenge.identity,
+            derivation: "verified".into(),
+            target: ProtectedLauncherCapabilityObservationTargetV1 {
+                environment: "self_hosted".into(),
+                os: "linux".into(),
+                architecture: "x64".into(),
+            },
+            capability_class: "systemd_protected_launcher_v3".into(),
+            runner_version: "2.337.0".into(),
+            signing_key_identity: verifier.key_identity,
+        };
+        ProtectedLauncherCapabilityObservationProjectionV1 {
+            projection_identity: protected_launcher_capability_observation_projection_v1_identity(
+                &payload,
+            )
+            .expect("projection identity"),
+            payload,
+            signature: "A".repeat(86),
+        }
+    }
+
+    #[test]
+    fn protected_capability_observation_records_are_closed_and_domain_separated() {
+        let challenge = capability_observation_challenge();
+        validate_protected_launcher_capability_observation_challenge_v1(
+            &challenge,
+            challenge.issued_at_unix_seconds,
+        )
+        .expect("fresh challenge");
+        let projection = capability_observation_projection();
+        validate_protected_launcher_capability_observation_projection_v1(&projection)
+            .expect("projection structure");
+        let verifier = capability_projection_verifier();
+        validate_protected_launcher_capability_projection_verifier_v1(&verifier)
+            .expect("verifier record");
+
+        assert_eq!(
+            challenge.identity,
+            "sha256:442b557b6066ad7a92e18065c5e743967ec75b76b3f341dcc29d573a65d2912c"
+        );
+        assert_eq!(
+            projection.projection_identity,
+            "sha256:baa4a23e06077b7c8d43c196ba5b45d4ba37faf8299f4a49fed939c545a7cd8e"
+        );
+        assert_eq!(
+            verifier.key_identity,
+            "sha256:82036a64e616d869ded1381fbf244f8ee8f6f3353839da23abbe8bf2688c78fc"
+        );
+        assert_eq!(
+            verifier.identity,
+            "sha256:9383e8b65bc0ed6ab5fcba4f70280793d28c9771003a2829d05af2b516ac4d86"
+        );
+
+        assert_ne!(challenge.identity, projection.projection_identity);
+        assert_ne!(projection.projection_identity, verifier.identity);
+        assert_ne!(verifier.identity, verifier.key_identity);
+        let signature_message = protected_launcher_capability_observation_signature_message_v1(
+            &projection.projection_identity,
+        )
+        .expect("signature message");
+        assert!(
+            signature_message
+                .starts_with(PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1)
+        );
+        assert_eq!(
+            &signature_message
+                [PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1.len()..],
+            projection.projection_identity.as_bytes()
+        );
+
+        let projection_json = serde_json::to_string(&projection).expect("projection JSON");
+        for prohibited in [
+            "protected_launcher_capability_identity",
+            "descriptor",
+            "cgroup",
+            "nonce_commitment",
+            "repository_path",
+            "provider",
+            "credential",
+        ] {
+            assert!(!projection_json.contains(prohibited));
+        }
+        let mut unknown = serde_json::to_value(&projection).expect("projection value");
+        unknown["capability_identity"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationProjectionV1>(unknown)
+                .is_err()
+        );
+        let mut unknown_payload = serde_json::to_value(&projection.payload).expect("payload value");
+        unknown_payload["provider"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationProjectionPayloadV1>(
+                unknown_payload,
+            )
+            .is_err()
+        );
+        let mut unknown_target =
+            serde_json::to_value(&projection.payload.target).expect("target value");
+        unknown_target["region"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationTargetV1>(
+                unknown_target
+            )
+            .is_err()
+        );
+        let mut unknown_challenge = serde_json::to_value(&challenge).expect("challenge value");
+        unknown_challenge["nonce"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationChallengeV1>(
+                unknown_challenge,
+            )
+            .is_err()
+        );
+        let mut unknown_verifier = serde_json::to_value(&verifier).expect("verifier value");
+        unknown_verifier["alternate_key"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityProjectionVerifierV1>(
+                unknown_verifier,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn protected_capability_observation_substitutions_refuse() {
+        let challenge = capability_observation_challenge();
+        assert_eq!(
+            validate_protected_launcher_capability_observation_challenge_v1(
+                &challenge,
+                challenge.expires_at_unix_seconds + 1,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            validate_protected_launcher_capability_observation_challenge_v1(
+                &challenge,
+                challenge.issued_at_unix_seconds - 1,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        for (issued_at_unix_seconds, expires_at_unix_seconds) in [
+            (0, 1),
+            (
+                challenge.issued_at_unix_seconds,
+                challenge.issued_at_unix_seconds,
+            ),
+            (
+                challenge.expires_at_unix_seconds,
+                challenge.issued_at_unix_seconds,
+            ),
+            (
+                challenge.issued_at_unix_seconds,
+                challenge.issued_at_unix_seconds + 301,
+            ),
+        ] {
+            let mut changed = challenge.clone();
+            changed.issued_at_unix_seconds = issued_at_unix_seconds;
+            changed.expires_at_unix_seconds = expires_at_unix_seconds;
+            assert_eq!(
+                protected_launcher_capability_observation_challenge_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        for (run_id, attempt) in [("0", "1"), ("01", "1"), ("1", "0"), ("1", "01")] {
+            let mut changed = challenge.clone();
+            changed.workflow_run_id = run_id.into();
+            changed.workflow_run_attempt = attempt.into();
+            assert_eq!(
+                protected_launcher_capability_observation_challenge_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        for workflow_reference in [
+            "ota-run/ota/.github/workflows/.hidden.yml@refs/heads/main",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/feature//test",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/feature/../main",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/feature/.hidden",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/main^",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/main.lock",
+            "ota-run/ota/.github/workflows/nested/check.yml@refs/heads/main",
+            "-ota/ota/.github/workflows/check.yml@refs/heads/main",
+            "ota-/ota/.github/workflows/check.yml@refs/heads/main",
+            "ota-run/.ota/.github/workflows/check.yml@refs/heads/main",
+            "ota-run/ota/.github/workflows/check.yml@main",
+        ] {
+            let mut changed = challenge.clone();
+            changed.workflow_reference = workflow_reference.into();
+            assert_eq!(
+                protected_launcher_capability_observation_challenge_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        let projection = capability_observation_projection();
+        let mut changed = projection.clone();
+        changed.payload.challenge_identity = format!("sha256:{}", "b".repeat(64));
+        assert_eq!(
+            validate_protected_launcher_capability_observation_projection_v1(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed = projection.clone();
+        changed.payload.target.architecture = "arm64".into();
+        assert_eq!(
+            protected_launcher_capability_observation_projection_v1_identity(&changed.payload),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            validate_protected_launcher_capability_observation_projection_v1(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        for runner_version in ["2.337.0", "2.337.0-rc.1", "2.337.0+build.7"] {
+            let mut changed = projection.clone();
+            changed.payload.runner_version = runner_version.into();
+            changed.projection_identity =
+                protected_launcher_capability_observation_projection_v1_identity(&changed.payload)
+                    .expect("canonical runner version");
+            validate_protected_launcher_capability_observation_projection_v1(&changed)
+                .expect("canonical projection");
+        }
+        for runner_version in ["banana", "01.2", "2.337", "v2.337.0", "2.337.0-01"] {
+            let mut changed = projection.clone();
+            changed.payload.runner_version = runner_version.into();
+            assert_eq!(
+                protected_launcher_capability_observation_projection_v1_identity(&changed.payload),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        for (field, value) in [
+            ("challenge_identity", format!("sha256:{}", "b".repeat(64))),
+            ("runner_version", "2.338.0".into()),
+            ("signing_key_identity", format!("sha256:{}", "c".repeat(64))),
+        ] {
+            let mut changed = projection.clone();
+            match field {
+                "challenge_identity" => changed.payload.challenge_identity = value,
+                "runner_version" => changed.payload.runner_version = value,
+                "signing_key_identity" => changed.payload.signing_key_identity = value,
+                _ => unreachable!(),
+            }
+            let changed_identity =
+                protected_launcher_capability_observation_projection_v1_identity(&changed.payload)
+                    .expect("structurally valid substitution");
+            assert_ne!(
+                changed_identity, projection.projection_identity,
+                "{field} is bound"
+            );
+        }
+
+        let verifier = capability_projection_verifier();
+        let mut noncanonical_key = verifier.clone();
+        noncanonical_key.public_key = format!("{}B", "A".repeat(42));
+        assert_eq!(
+            protected_launcher_capability_projection_verifier_v1_identity(&noncanonical_key),
+            Err(ProtocolError::InvalidRecord)
+        );
+        for final_character in [
+            b'A', b'E', b'I', b'M', b'Q', b'U', b'Y', b'c', b'g', b'k', b'o', b's', b'w', b'0',
+            b'4', b'8',
+        ] {
+            let mut accepted = verifier.clone();
+            accepted.public_key = format!("{}{}", "A".repeat(42), char::from(final_character));
+            accepted.key_identity =
+                protected_launcher_capability_projection_key_identity_v1(&accepted.public_key)
+                    .expect("canonical public-key tail");
+            accepted.identity =
+                protected_launcher_capability_projection_verifier_v1_identity(&accepted)
+                    .expect("canonical verifier tail");
+            validate_protected_launcher_capability_projection_verifier_v1(&accepted)
+                .expect("canonical verifier");
+        }
+        for public_key in [
+            format!("{}=", "A".repeat(42)),
+            "A".repeat(42),
+            format!("{}!", "A".repeat(42)),
+        ] {
+            assert_eq!(
+                protected_launcher_capability_projection_key_identity_v1(&public_key),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let mut noncanonical_signature = projection;
+        noncanonical_signature.signature = format!("{}B", "A".repeat(85));
+        assert_eq!(
+            validate_protected_launcher_capability_observation_projection_v1(
+                &noncanonical_signature,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        for final_character in [b'A', b'Q', b'g', b'w'] {
+            let mut accepted = capability_observation_projection();
+            accepted.signature = format!("{}{}", "A".repeat(85), char::from(final_character));
+            validate_protected_launcher_capability_observation_projection_v1(&accepted)
+                .expect("canonical signature tail");
+        }
+        for field in [
+            "schema_version",
+            "record_kind",
+            "key_usage",
+            "signature_domain",
+        ] {
+            let mut value = serde_json::to_value(&verifier).expect("verifier value");
+            value[field] = match field {
+                "schema_version" => serde_json::json!(2),
+                _ => serde_json::json!("substituted"),
+            };
+            let changed: ProtectedLauncherCapabilityProjectionVerifierV1 =
+                serde_json::from_value(value).expect("changed verifier");
+            assert_eq!(
+                protected_launcher_capability_projection_verifier_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord),
+                "{field} substitution must refuse"
+            );
+        }
     }
 
     fn protected_capability() -> ProtectedLauncherCapabilityV1 {

@@ -32,6 +32,7 @@ repository = "https://github.com/ota-run/authority-protocol"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.2.0"
+semver = "1"
 sha2 = "0.10"
 thiserror = "2"
 
