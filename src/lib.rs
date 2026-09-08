@@ -523,6 +523,9 @@ pub struct ProtectedLauncherCapabilityObservationRequestV1 {
     pub challenge: ProtectedLauncherCapabilityObservationChallengeV1,
     pub nonce: String,
     pub runner_version: String,
+    /// Protected identity of the exact Launcher invocation Core expects to observe.
+    /// This remains local transport input and is never projected publicly.
+    pub expected_launcher_request_identity: String,
 }
 
 /// Fixed local response carrying only the bounded public projection.
@@ -2270,6 +2273,7 @@ pub fn protected_launcher_capability_observation_request_v1_identity(
         || request.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST
         || !is_canonical_base64url_32_bytes(&request.nonce)
         || !is_canonical_semver(&request.runner_version)
+        || !is_sha256_identity(&request.expected_launcher_request_identity)
         || protected_launcher_capability_observation_challenge_v1_identity(&request.challenge)?
             != request.challenge.identity
     {
@@ -4608,6 +4612,7 @@ mod tests {
             challenge: capability_observation_challenge(),
             nonce: URL_SAFE_NO_PAD.encode(nonce),
             runner_version: "2.337.0".into(),
+            expected_launcher_request_identity: format!("sha256:{}", "3".repeat(64)),
         };
         request.identity = protected_launcher_capability_observation_request_v1_identity(&request)
             .expect("request identity");
@@ -4898,6 +4903,20 @@ mod tests {
         changed.runner_version = "banana".into();
         assert_eq!(
             protected_launcher_capability_observation_request_v1_identity(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed = request.clone();
+        changed.expected_launcher_request_identity = format!("sha256:{}", "4".repeat(64));
+        let changed_identity =
+            protected_launcher_capability_observation_request_v1_identity(&changed)
+                .expect("changed request identity");
+        assert_ne!(changed_identity, request.identity);
+        changed.identity = changed_identity;
+        assert!(protected_launcher_capability_observation_request_v1_identity(&changed).is_ok());
+        let mut malformed = request.clone();
+        malformed.expected_launcher_request_identity = "not-an-identity".into();
+        assert_eq!(
+            protected_launcher_capability_observation_request_v1_identity(&malformed),
             Err(ProtocolError::InvalidRecord)
         );
         assert_eq!(
