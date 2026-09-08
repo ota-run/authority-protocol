@@ -25,6 +25,8 @@
 //! This crate deliberately contains no authority-selection, trust-root, approval, persistence,
 //! execution, receipt, or archive policy.
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -83,6 +85,10 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE: &str =
     "protected_launcher_capability_observation_challenge";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION: &str =
     "protected_launcher_capability_observation";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST: &str =
+    "protected_launcher_capability_observation_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE: &str =
+    "protected_launcher_capability_observation_response";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER: &str =
     "protected_launcher_capability_projection_verifier";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1: &str =
@@ -161,6 +167,8 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE_IDENTITY_DOMAIN_V1
     b"ota.protected-launcher-capability-observation-challenge.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-projection.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-request.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-signature.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
@@ -495,6 +503,30 @@ pub struct ProtectedLauncherCapabilityObservationProjectionV1 {
     pub payload: ProtectedLauncherCapabilityObservationProjectionPayloadV1,
     pub projection_identity: String,
     pub signature: String,
+}
+
+/// Fixed local request carrying Core's fresh challenge to the protected launcher.
+///
+/// `nonce` is confidential local transport input. It is never a public projection field.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub challenge: ProtectedLauncherCapabilityObservationChallengeV1,
+    pub nonce: String,
+    pub runner_version: String,
+}
+
+/// Fixed local response carrying only the bounded public projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
 }
 
 /// Administrator-installed public verifier for exactly one projection protocol.
@@ -2199,6 +2231,47 @@ pub fn validate_protected_launcher_capability_observation_challenge_v1(
         return Err(ProtocolError::InvalidRecord);
     }
     Ok(())
+}
+
+pub fn protected_launcher_capability_observation_request_v1_identity(
+    request: &ProtectedLauncherCapabilityObservationRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST
+        || !is_canonical_base64url_32_bytes(&request.nonce)
+        || !is_canonical_semver(&request.runner_version)
+        || protected_launcher_capability_observation_challenge_v1_identity(&request.challenge)?
+            != request.challenge.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let nonce = URL_SAFE_NO_PAD
+        .decode(&request.nonce)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if protected_launcher_capability_observation_nonce_commitment_v1(&nonce)?
+        != request.challenge.nonce_commitment
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_observation_response_v1(
+    response: &ProtectedLauncherCapabilityObservationResponseV1,
+) -> Result<(), ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+        || response.projection.payload.challenge_identity.is_empty()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_capability_observation_projection_v1(&response.projection)
 }
 
 pub fn protected_launcher_capability_projection_key_identity_v1(
@@ -4122,6 +4195,13 @@ fn is_base64url_no_pad(value: &str, exact_len: usize) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
+fn is_canonical_base64url_32_bytes(value: &str) -> bool {
+    is_base64url_no_pad(value, 43)
+        && URL_SAFE_NO_PAD
+            .decode(value)
+            .is_ok_and(|bytes| bytes.len() == 32)
+}
+
 fn is_canonical_ed25519_public_key(value: &str) -> bool {
     is_base64url_no_pad(value, 43)
         && value.as_bytes().last().is_some_and(|byte| {
@@ -4430,6 +4510,21 @@ mod tests {
         }
     }
 
+    fn capability_observation_request() -> ProtectedLauncherCapabilityObservationRequestV1 {
+        let nonce = [7_u8; 32];
+        let mut request = ProtectedLauncherCapabilityObservationRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST.into(),
+            identity: String::new(),
+            challenge: capability_observation_challenge(),
+            nonce: URL_SAFE_NO_PAD.encode(nonce),
+            runner_version: "2.337.0".into(),
+        };
+        request.identity = protected_launcher_capability_observation_request_v1_identity(&request)
+            .expect("request identity");
+        request
+    }
+
     #[test]
     fn protected_capability_observation_records_are_closed_and_domain_separated() {
         let challenge = capability_observation_challenge();
@@ -4444,6 +4539,21 @@ mod tests {
         let verifier = capability_projection_verifier();
         validate_protected_launcher_capability_projection_verifier_v1(&verifier)
             .expect("verifier record");
+        let request = capability_observation_request();
+        assert_eq!(
+            protected_launcher_capability_observation_request_v1_identity(&request)
+                .expect("request identity"),
+            request.identity
+        );
+        validate_protected_launcher_capability_observation_response_v1(
+            &ProtectedLauncherCapabilityObservationResponseV1 {
+                schema_version: 1,
+                message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE.into(),
+                request_identity: request.identity.clone(),
+                projection: projection.clone(),
+            },
+        )
+        .expect("response structure");
 
         assert_eq!(
             challenge.identity,
@@ -4522,6 +4632,14 @@ mod tests {
             )
             .is_err()
         );
+        let mut unknown_request = serde_json::to_value(&request).expect("request value");
+        unknown_request["provider"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationRequestV1>(
+                unknown_request
+            )
+            .is_err()
+        );
         let mut unknown_verifier = serde_json::to_value(&verifier).expect("verifier value");
         unknown_verifier["alternate_key"] = serde_json::Value::String("forbidden".into());
         assert!(
@@ -4535,6 +4653,25 @@ mod tests {
     #[test]
     fn protected_capability_observation_substitutions_refuse() {
         let challenge = capability_observation_challenge();
+        let request = capability_observation_request();
+        for nonce in [
+            "A".repeat(42),
+            format!("{}=", "A".repeat(42)),
+            "!".repeat(43),
+        ] {
+            let mut changed = request.clone();
+            changed.nonce = nonce;
+            assert_eq!(
+                protected_launcher_capability_observation_request_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let mut changed = request.clone();
+        changed.runner_version = "banana".into();
+        assert_eq!(
+            protected_launcher_capability_observation_request_v1_identity(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
         assert_eq!(
             validate_protected_launcher_capability_observation_challenge_v1(
                 &challenge,
