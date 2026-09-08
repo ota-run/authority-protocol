@@ -46,6 +46,9 @@ This repository owns:
 - closed challenge, public capability-observation projection, and administrator-installed verifier
   records that bind one fresh workflow invocation without publishing the raw protected-capability
   identity or its transitive private correlation inputs;
+- a closed protected Launcher-to-Attestor signing envelope that binds the exact private capability,
+  public payload, producer binding, verifier, and projection identity while returning only the
+  signed public projection, with cross-record reconciliation against the retained request;
 - the bounded Linux systemd-launcher client/service request, output, and terminal frames;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and

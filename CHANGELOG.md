@@ -30,8 +30,11 @@
   installed verifier records. The challenge binds one fresh workflow invocation with a five-minute
   maximum lifetime. The projection hashes an unsigned JCS payload and signs its identity under a
   separate Ed25519 domain; the verifier record binds the exact public key, key usage, and signature
-  domain. These records expose no raw protected-capability identity and grant no provider authority,
-  contact, delivery, execution approval, receipt, or assurance.
+  domain. A protected Launcher-to-Attestor signing envelope binds one exact private capability,
+  public payload, projection identity, producer binding, and verifier identity without returning
+  private capability truth. Cross-record reconciliation requires the returned request, payload, and
+  projection identities to equal the retained signing request. These records grant no provider
+  authority, contact, delivery, execution approval, receipt, or assurance.
 
 - Reconcile the README with the implemented protocol boundary: remove stale preview/planned
   wording, distinguish versioned conformance-tested source from a stable crate release, and show

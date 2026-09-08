@@ -89,6 +89,10 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST: &str =
     "protected_launcher_capability_observation_request";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE: &str =
     "protected_launcher_capability_observation_response";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST: &str =
+    "protected_launcher_capability_observation_signing_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE: &str =
+    "protected_launcher_capability_observation_signing_response";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER: &str =
     "protected_launcher_capability_projection_verifier";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1: &str =
@@ -169,6 +173,8 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_IDENTITY_DOMAIN_V
     b"ota.protected-launcher-capability-observation-projection.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-request.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-signing-request.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-signature.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
@@ -523,6 +529,30 @@ pub struct ProtectedLauncherCapabilityObservationRequestV1 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ProtectedLauncherCapabilityObservationResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// Protected Launcher-to-Attestor request for one exact capability-observation signature.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationSigningRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub producer_binding_identity: String,
+    pub verifier_identity: String,
+    pub protected_capability_identity: String,
+    pub payload: ProtectedLauncherCapabilityObservationProjectionPayloadV1,
+    pub projection_identity: String,
+}
+
+/// Protected Attestor response containing only the signed public projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationSigningResponseV1 {
     pub schema_version: u32,
     pub message_kind: String,
     pub request_identity: String,
@@ -2272,6 +2302,65 @@ pub fn validate_protected_launcher_capability_observation_response_v1(
         return Err(ProtocolError::InvalidRecord);
     }
     validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+}
+
+pub fn protected_launcher_capability_observation_signing_request_v1_identity(
+    request: &ProtectedLauncherCapabilityObservationSigningRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST
+        || !is_sha256_identity(&request.producer_binding_identity)
+        || !is_sha256_identity(&request.verifier_identity)
+        || !is_sha256_identity(&request.protected_capability_identity)
+        || request.projection_identity
+            != protected_launcher_capability_observation_projection_v1_identity(&request.payload)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_observation_signing_request_v1(
+    request: &ProtectedLauncherCapabilityObservationSigningRequestV1,
+) -> Result<(), ProtocolError> {
+    if request.identity
+        != protected_launcher_capability_observation_signing_request_v1_identity(request)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn validate_protected_launcher_capability_observation_signing_response_v1(
+    response: &ProtectedLauncherCapabilityObservationSigningResponseV1,
+) -> Result<(), ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+}
+
+pub fn reconcile_protected_launcher_capability_observation_signing_response_v1(
+    request: &ProtectedLauncherCapabilityObservationSigningRequestV1,
+    response: &ProtectedLauncherCapabilityObservationSigningResponseV1,
+) -> Result<(), ProtocolError> {
+    validate_protected_launcher_capability_observation_signing_request_v1(request)?;
+    validate_protected_launcher_capability_observation_signing_response_v1(response)?;
+    if response.request_identity != request.identity
+        || response.projection.payload != request.payload
+        || response.projection.projection_identity != request.projection_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
 }
 
 pub fn protected_launcher_capability_projection_key_identity_v1(
@@ -4525,6 +4614,28 @@ mod tests {
         request
     }
 
+    fn capability_observation_signing_request()
+    -> ProtectedLauncherCapabilityObservationSigningRequestV1 {
+        let payload = capability_observation_projection().payload;
+        let projection_identity =
+            protected_launcher_capability_observation_projection_v1_identity(&payload)
+                .expect("projection identity");
+        let mut request = ProtectedLauncherCapabilityObservationSigningRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST.into(),
+            identity: String::new(),
+            producer_binding_identity: format!("sha256:{}", "1".repeat(64)),
+            verifier_identity: capability_projection_verifier().identity,
+            protected_capability_identity: format!("sha256:{}", "2".repeat(64)),
+            payload,
+            projection_identity,
+        };
+        request.identity =
+            protected_launcher_capability_observation_signing_request_v1_identity(&request)
+                .expect("signing request identity");
+        request
+    }
+
     #[test]
     fn protected_capability_observation_records_are_closed_and_domain_separated() {
         let challenge = capability_observation_challenge();
@@ -4554,6 +4665,22 @@ mod tests {
             },
         )
         .expect("response structure");
+        let signing_request = capability_observation_signing_request();
+        validate_protected_launcher_capability_observation_signing_request_v1(&signing_request)
+            .expect("signing request");
+        let signing_response = ProtectedLauncherCapabilityObservationSigningResponseV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE.into(),
+            request_identity: signing_request.identity.clone(),
+            projection: projection.clone(),
+        };
+        validate_protected_launcher_capability_observation_signing_response_v1(&signing_response)
+            .expect("signing response");
+        reconcile_protected_launcher_capability_observation_signing_response_v1(
+            &signing_request,
+            &signing_response,
+        )
+        .expect("signing response reconciliation");
 
         assert_eq!(
             challenge.identity,
@@ -4648,12 +4775,113 @@ mod tests {
             )
             .is_err()
         );
+        let mut unknown_signing_request =
+            serde_json::to_value(&signing_request).expect("signing request value");
+        unknown_signing_request["private_key"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationSigningRequestV1>(
+                unknown_signing_request,
+            )
+            .is_err()
+        );
+        let mut unknown_signing_response =
+            serde_json::to_value(&signing_response).expect("signing response value");
+        unknown_signing_response["protected_capability_identity"] =
+            serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationSigningResponseV1>(
+                unknown_signing_response,
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn protected_capability_observation_substitutions_refuse() {
         let challenge = capability_observation_challenge();
         let request = capability_observation_request();
+        let signing_request = capability_observation_signing_request();
+        for field in [
+            "producer_binding_identity",
+            "verifier_identity",
+            "protected_capability_identity",
+        ] {
+            let mut changed = signing_request.clone();
+            match field {
+                "producer_binding_identity" => {
+                    changed.producer_binding_identity = format!("sha256:{}", "a".repeat(64));
+                }
+                "verifier_identity" => {
+                    changed.verifier_identity = format!("sha256:{}", "b".repeat(64));
+                }
+                "protected_capability_identity" => {
+                    changed.protected_capability_identity = format!("sha256:{}", "c".repeat(64));
+                }
+                _ => unreachable!(),
+            }
+            assert_ne!(
+                protected_launcher_capability_observation_signing_request_v1_identity(&changed)
+                    .expect("changed signing identity"),
+                signing_request.identity
+            );
+            assert_eq!(
+                validate_protected_launcher_capability_observation_signing_request_v1(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let mut changed_payload = signing_request.clone();
+        changed_payload.payload.runner_version = "2.338.0".into();
+        changed_payload.projection_identity =
+            protected_launcher_capability_observation_projection_v1_identity(
+                &changed_payload.payload,
+            )
+            .expect("changed projection identity");
+        assert_ne!(
+            protected_launcher_capability_observation_signing_request_v1_identity(&changed_payload)
+                .expect("changed signing request identity"),
+            signing_request.identity
+        );
+        assert_eq!(
+            validate_protected_launcher_capability_observation_signing_request_v1(&changed_payload),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let original_response = ProtectedLauncherCapabilityObservationSigningResponseV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE.into(),
+            request_identity: signing_request.identity.clone(),
+            projection: ProtectedLauncherCapabilityObservationProjectionV1 {
+                payload: signing_request.payload.clone(),
+                projection_identity: signing_request.projection_identity.clone(),
+                signature: "A".repeat(86),
+            },
+        };
+        let mut substituted_response = original_response.clone();
+        substituted_response.projection.payload.runner_version = "2.338.0".into();
+        substituted_response.projection.projection_identity =
+            protected_launcher_capability_observation_projection_v1_identity(
+                &substituted_response.projection.payload,
+            )
+            .expect("substituted projection identity");
+        validate_protected_launcher_capability_observation_signing_response_v1(
+            &substituted_response,
+        )
+        .expect("self-consistent substituted response");
+        assert_eq!(
+            reconcile_protected_launcher_capability_observation_signing_response_v1(
+                &signing_request,
+                &substituted_response,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut substituted_request_identity = original_response;
+        substituted_request_identity.request_identity = format!("sha256:{}", "d".repeat(64));
+        assert_eq!(
+            reconcile_protected_launcher_capability_observation_signing_response_v1(
+                &signing_request,
+                &substituted_request_identity,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
         for nonce in [
             "A".repeat(42),
             format!("{}=", "A".repeat(42)),
