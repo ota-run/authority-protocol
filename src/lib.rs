@@ -87,6 +87,8 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION: &str =
     "protected_launcher_capability_observation";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST: &str =
     "protected_launcher_capability_observation_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST: &str =
+    "protected_launcher_capability_observation_probe_request";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE: &str =
     "protected_launcher_capability_observation_response";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST: &str =
@@ -173,6 +175,8 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_IDENTITY_DOMAIN_V
     b"ota.protected-launcher-capability-observation-projection.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-request.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-probe-request.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-signing-request.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
@@ -526,6 +530,18 @@ pub struct ProtectedLauncherCapabilityObservationRequestV1 {
     /// Protected identity of the exact Launcher invocation Core expects to observe.
     /// This remains local transport input and is never projected publicly.
     pub expected_launcher_request_identity: String,
+}
+
+/// One closed local request that binds an accepted Launcher invocation to Core's fresh
+/// capability-observation request. Neither record is public projection material.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationProbeRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub invocation: LauncherInvocationRequestV1,
+    pub observation: ProtectedLauncherCapabilityObservationRequestV1,
 }
 
 /// Fixed local response carrying only the bounded public projection.
@@ -2291,6 +2307,26 @@ pub fn protected_launcher_capability_observation_request_v1_identity(
     canonical.identity.clear();
     message_identity(
         PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_capability_observation_probe_request_v1_identity(
+    request: &ProtectedLauncherCapabilityObservationProbeRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST
+        || request.observation.identity
+            != protected_launcher_capability_observation_request_v1_identity(&request.observation)?
+        || request.observation.expected_launcher_request_identity
+            != launcher_invocation_request_identity(&request.invocation)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST_IDENTITY_DOMAIN_V1,
         &canonical,
     )
 }
@@ -4603,8 +4639,19 @@ mod tests {
         }
     }
 
+    fn capability_observation_invocation() -> LauncherInvocationRequestV1 {
+        LauncherInvocationRequestV1 {
+            message_kind: LAUNCHER_INVOCATION_REQUEST.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            authority_id: "secret-delivery".into(),
+            ota_arguments: vec!["run".into(), "publish".into()],
+            repository_path: "/srv/ota/repository".into(),
+        }
+    }
+
     fn capability_observation_request() -> ProtectedLauncherCapabilityObservationRequestV1 {
         let nonce = [7_u8; 32];
+        let invocation = capability_observation_invocation();
         let mut request = ProtectedLauncherCapabilityObservationRequestV1 {
             schema_version: 1,
             message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST.into(),
@@ -4612,10 +4659,26 @@ mod tests {
             challenge: capability_observation_challenge(),
             nonce: URL_SAFE_NO_PAD.encode(nonce),
             runner_version: "2.337.0".into(),
-            expected_launcher_request_identity: format!("sha256:{}", "3".repeat(64)),
+            expected_launcher_request_identity: launcher_invocation_request_identity(&invocation)
+                .expect("invocation identity"),
         };
         request.identity = protected_launcher_capability_observation_request_v1_identity(&request)
             .expect("request identity");
+        request
+    }
+
+    fn capability_observation_probe_request() -> ProtectedLauncherCapabilityObservationProbeRequestV1
+    {
+        let mut request = ProtectedLauncherCapabilityObservationProbeRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST.into(),
+            identity: String::new(),
+            invocation: capability_observation_invocation(),
+            observation: capability_observation_request(),
+        };
+        request.identity =
+            protected_launcher_capability_observation_probe_request_v1_identity(&request)
+                .expect("probe request identity");
         request
     }
 
@@ -4660,6 +4723,12 @@ mod tests {
             protected_launcher_capability_observation_request_v1_identity(&request)
                 .expect("request identity"),
             request.identity
+        );
+        let probe_request = capability_observation_probe_request();
+        assert_eq!(
+            protected_launcher_capability_observation_probe_request_v1_identity(&probe_request)
+                .expect("probe request identity"),
+            probe_request.identity
         );
         validate_protected_launcher_capability_observation_response_v1(
             &ProtectedLauncherCapabilityObservationResponseV1 {
@@ -4772,6 +4841,14 @@ mod tests {
             )
             .is_err()
         );
+        let mut unknown_probe = serde_json::to_value(&probe_request).expect("probe value");
+        unknown_probe["provider"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationProbeRequestV1>(
+                unknown_probe
+            )
+            .is_err()
+        );
         let mut unknown_verifier = serde_json::to_value(&verifier).expect("verifier value");
         unknown_verifier["alternate_key"] = serde_json::Value::String("forbidden".into());
         assert!(
@@ -4805,6 +4882,7 @@ mod tests {
     fn protected_capability_observation_substitutions_refuse() {
         let challenge = capability_observation_challenge();
         let request = capability_observation_request();
+        let probe_request = capability_observation_probe_request();
         let signing_request = capability_observation_signing_request();
         for field in [
             "producer_binding_identity",
@@ -4917,6 +4995,19 @@ mod tests {
         malformed.expected_launcher_request_identity = "not-an-identity".into();
         assert_eq!(
             protected_launcher_capability_observation_request_v1_identity(&malformed),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut substituted_probe = probe_request.clone();
+        substituted_probe
+            .observation
+            .expected_launcher_request_identity = format!("sha256:{}", "f".repeat(64));
+        substituted_probe.observation.identity =
+            protected_launcher_capability_observation_request_v1_identity(
+                &substituted_probe.observation,
+            )
+            .expect("substituted observation identity");
+        assert_eq!(
+            protected_launcher_capability_observation_probe_request_v1_identity(&substituted_probe),
             Err(ProtocolError::InvalidRecord)
         );
         assert_eq!(
