@@ -81,6 +81,10 @@ pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
 pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
 pub const PROTECTED_LAUNCHER_CAPABILITY: &str = "protected_launcher_capability";
+pub const RUNNER_ADMINISTRATOR_AUTHORITY: &str = "runner_administrator_authority";
+pub const PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT: &str =
+    "protected_launcher_implementation_subject";
+pub const PROTECTED_LAUNCHER_AUTHORITY_CONTEXT: &str = "protected_launcher_authority_context";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE: &str =
     "protected_launcher_capability_observation_challenge";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION: &str =
@@ -167,6 +171,15 @@ pub const PROTECTED_LAUNCHER_CGROUP_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.protected-cgroup.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.protected-capability.v1\0";
+pub const RUNNER_ADMINISTRATOR_AUTHORITY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.runner-administrator-authority.v1\0";
+pub const PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.implementation-subject.v1\0";
+pub const PROTECTED_LAUNCHER_AUTHORITY_CONTEXT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.authority-context.v1\0";
+pub const PROTECTED_LAUNCHER_INVOCATION_NONCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.invocation-nonce.v1\0";
+pub const PROTECTED_LAUNCHER_BOOT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.authority-launcher.boot.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_NONCE_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-nonce.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] =
@@ -440,6 +453,66 @@ pub struct ProtectedLauncherCapabilityV1 {
     pub process_posture_identity: String,
     pub implementation_subject_identity: String,
     pub descriptors: Vec<ProtectedLauncherDescriptorV1>,
+}
+
+/// Stable identity of the independently administered protected-runner authority.
+///
+/// Installation and ownership evidence establish who controls this record. This record only
+/// defines its canonical semantic identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerAdministratorAuthorityV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub authority_id: String,
+    pub authority_instance_id: String,
+    pub administration_scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherImplementationTargetV1 {
+    pub environment: String,
+    pub os: String,
+    pub architecture: String,
+    pub execution_mode: String,
+    pub launcher_class: String,
+}
+
+/// Exact installed Launcher and Ota implementation subject for the first protected-runner target.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherImplementationSubjectV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub launcher_source_repository: String,
+    pub launcher_source_revision: String,
+    pub core_source_repository: String,
+    pub core_source_revision: String,
+    pub protocol_source_repository: String,
+    pub protocol_source_revision: String,
+    pub launcher_build_identity: String,
+    pub core_build_identity: String,
+    pub launcher_artifact_identity: String,
+    pub ota_artifact_identity: String,
+    pub protocol_version: String,
+    pub minimum_core_version: String,
+    pub maximum_exclusive_core_version: String,
+    pub launcher_profile_identity: String,
+    pub target: ProtectedLauncherImplementationTargetV1,
+}
+
+/// Administrator-installed static context required before live capability derivation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherAuthorityContextV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub runner_administrator: RunnerAdministratorAuthorityV1,
+    pub implementation_subject: ProtectedLauncherImplementationSubjectV1,
 }
 
 /// Independently observed records used to reconcile a protected capability.
@@ -2159,6 +2232,110 @@ pub fn protected_launcher_cgroup_v1_identity(
             descriptor_identity: descriptor.identity.as_str(),
         },
     )
+}
+
+pub fn runner_administrator_authority_v1_identity(
+    authority: &RunnerAdministratorAuthorityV1,
+) -> Result<String, ProtocolError> {
+    if authority.schema_version != 1
+        || authority.record_kind != RUNNER_ADMINISTRATOR_AUTHORITY
+        || !is_canonical_lowercase_label(
+            &authority.authority_id,
+            MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1,
+        )
+        || !is_canonical_nonzero_base64url_32_bytes(&authority.authority_instance_id)
+        || authority.administration_scope != "protected_self_hosted_runner"
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = authority.clone();
+    canonical.identity.clear();
+    message_identity(
+        RUNNER_ADMINISTRATOR_AUTHORITY_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_implementation_subject_v1_identity(
+    subject: &ProtectedLauncherImplementationSubjectV1,
+) -> Result<String, ProtocolError> {
+    let minimum_core =
+        Version::parse(&subject.minimum_core_version).map_err(|_| ProtocolError::InvalidRecord)?;
+    let maximum_core = Version::parse(&subject.maximum_exclusive_core_version)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if subject.schema_version != 1
+        || subject.record_kind != PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT
+        || subject.launcher_source_repository != "https://github.com/ota-run/authority-launcher"
+        || subject.core_source_repository != "https://github.com/ota-run/ota"
+        || subject.protocol_source_repository != "https://github.com/ota-run/authority-protocol"
+        || !is_canonical_git_revision(&subject.launcher_source_revision)
+        || !is_canonical_git_revision(&subject.core_source_revision)
+        || !is_canonical_git_revision(&subject.protocol_source_revision)
+        || !is_sha256_identity(&subject.launcher_build_identity)
+        || !is_sha256_identity(&subject.core_build_identity)
+        || !is_sha256_identity(&subject.launcher_artifact_identity)
+        || !is_sha256_identity(&subject.ota_artifact_identity)
+        || subject.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || !is_canonical_semver(&subject.minimum_core_version)
+        || !is_canonical_semver(&subject.maximum_exclusive_core_version)
+        || minimum_core >= maximum_core
+        || !is_sha256_identity(&subject.launcher_profile_identity)
+        || subject.target.environment != "self_hosted"
+        || subject.target.os != "linux"
+        || subject.target.architecture != "x86_64"
+        || subject.target.execution_mode != "native"
+        || subject.target.launcher_class != "systemd_protected_launcher_v3"
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = subject.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_authority_context_v1_identity(
+    context: &ProtectedLauncherAuthorityContextV1,
+) -> Result<String, ProtocolError> {
+    if context.schema_version != 1
+        || context.record_kind != PROTECTED_LAUNCHER_AUTHORITY_CONTEXT
+        || runner_administrator_authority_v1_identity(&context.runner_administrator)?
+            != context.runner_administrator.identity
+        || protected_launcher_implementation_subject_v1_identity(&context.implementation_subject)?
+            != context.implementation_subject.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = context.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_AUTHORITY_CONTEXT_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_invocation_nonce_v1_identity(
+    nonce: &[u8],
+) -> Result<String, ProtocolError> {
+    if nonce.len() != 32 {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_LAUNCHER_INVOCATION_NONCE_IDENTITY_DOMAIN_V1,
+        nonce,
+    )))
+}
+
+pub fn protected_launcher_boot_v1_identity(boot_id: &str) -> Result<String, ProtocolError> {
+    if !is_canonical_lowercase_uuid(boot_id) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_LAUNCHER_BOOT_IDENTITY_DOMAIN_V1,
+        boot_id.as_bytes(),
+    )))
 }
 
 pub fn protected_launcher_capability_v1_identity(
@@ -4317,6 +4494,36 @@ fn is_sha256_identity(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn is_canonical_git_revision(value: &str) -> bool {
+    value.len() == 40
+        && value.bytes().any(|byte| byte != b'0')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn is_canonical_lowercase_label(value: &str, maximum_bytes: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum_bytes
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+        })
+        && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
+fn is_canonical_lowercase_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value != "00000000-0000-0000-0000-000000000000"
+        && value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'),
+        })
+}
+
 fn is_base64url_no_pad(value: &str, exact_len: usize) -> bool {
     value.len() == exact_len
         && value
@@ -4329,6 +4536,13 @@ fn is_canonical_base64url_32_bytes(value: &str) -> bool {
         && URL_SAFE_NO_PAD
             .decode(value)
             .is_ok_and(|bytes| bytes.len() == 32)
+}
+
+fn is_canonical_nonzero_base64url_32_bytes(value: &str) -> bool {
+    is_canonical_base64url_32_bytes(value)
+        && URL_SAFE_NO_PAD
+            .decode(value)
+            .is_ok_and(|bytes| bytes.iter().any(|byte| *byte != 0))
 }
 
 fn is_canonical_ed25519_public_key(value: &str) -> bool {
@@ -4501,6 +4715,60 @@ mod tests {
 
     const VERIFIER_STORE_BYTES: &[u8] = br#"{"schema_version":1,"verifiers":[]}"#;
     const BINDING_STORE_BYTES: &[u8] = br#"{"schema_version":1,"bindings":[]}"#;
+
+    fn protected_launcher_authority_context() -> ProtectedLauncherAuthorityContextV1 {
+        let digest = |character: char| format!("sha256:{}", character.to_string().repeat(64));
+        let mut runner_administrator = RunnerAdministratorAuthorityV1 {
+            schema_version: 1,
+            record_kind: RUNNER_ADMINISTRATOR_AUTHORITY.into(),
+            identity: String::new(),
+            authority_id: "ota-runner-administrator".into(),
+            authority_instance_id: URL_SAFE_NO_PAD.encode([1_u8; 32]),
+            administration_scope: "protected_self_hosted_runner".into(),
+        };
+        runner_administrator.identity =
+            runner_administrator_authority_v1_identity(&runner_administrator)
+                .expect("runner administrator identity");
+        let mut implementation_subject = ProtectedLauncherImplementationSubjectV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT.into(),
+            identity: String::new(),
+            launcher_source_repository: "https://github.com/ota-run/authority-launcher".into(),
+            launcher_source_revision: "a".repeat(40),
+            core_source_repository: "https://github.com/ota-run/ota".into(),
+            core_source_revision: "b".repeat(40),
+            protocol_source_repository: "https://github.com/ota-run/authority-protocol".into(),
+            protocol_source_revision: "c".repeat(40),
+            launcher_build_identity: digest('1'),
+            core_build_identity: digest('2'),
+            launcher_artifact_identity: digest('3'),
+            ota_artifact_identity: digest('4'),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            minimum_core_version: "1.6.28".into(),
+            maximum_exclusive_core_version: "1.7.0".into(),
+            launcher_profile_identity: digest('5'),
+            target: ProtectedLauncherImplementationTargetV1 {
+                environment: "self_hosted".into(),
+                os: "linux".into(),
+                architecture: "x86_64".into(),
+                execution_mode: "native".into(),
+                launcher_class: "systemd_protected_launcher_v3".into(),
+            },
+        };
+        implementation_subject.identity =
+            protected_launcher_implementation_subject_v1_identity(&implementation_subject)
+                .expect("implementation subject identity");
+        let mut context = ProtectedLauncherAuthorityContextV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_LAUNCHER_AUTHORITY_CONTEXT.into(),
+            identity: String::new(),
+            runner_administrator,
+            implementation_subject,
+        };
+        context.identity = protected_launcher_authority_context_v1_identity(&context)
+            .expect("authority context identity");
+        context
+    }
 
     fn protected_descriptor(
         role: ProtectedLauncherDescriptorRoleV1,
@@ -4702,6 +4970,163 @@ mod tests {
             protected_launcher_capability_observation_signing_request_v1_identity(&request)
                 .expect("signing request identity");
         request
+    }
+
+    #[test]
+    fn protected_launcher_authority_context_is_closed_and_domain_separated() {
+        let context = protected_launcher_authority_context();
+        assert_eq!(
+            protected_launcher_authority_context_v1_identity(&context).as_deref(),
+            Ok(context.identity.as_str())
+        );
+        assert_ne!(
+            context.identity, context.runner_administrator.identity,
+            "outer context identity must not alias administrator identity"
+        );
+        assert_ne!(
+            context.identity, context.implementation_subject.identity,
+            "outer context identity must not alias implementation identity"
+        );
+
+        let mut unknown_context = serde_json::to_value(&context).expect("context JSON");
+        unknown_context
+            .as_object_mut()
+            .expect("context object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherAuthorityContextV1>(unknown_context).is_err()
+        );
+        let mut unknown_administrator =
+            serde_json::to_value(&context.runner_administrator).expect("administrator JSON");
+        unknown_administrator
+            .as_object_mut()
+            .expect("administrator object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<RunnerAdministratorAuthorityV1>(unknown_administrator)
+                .is_err()
+        );
+        let mut unknown_subject =
+            serde_json::to_value(&context.implementation_subject).expect("subject JSON");
+        unknown_subject
+            .as_object_mut()
+            .expect("subject object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherImplementationSubjectV1>(unknown_subject)
+                .is_err()
+        );
+        let mut unknown_target =
+            serde_json::to_value(&context.implementation_subject.target).expect("target JSON");
+        unknown_target
+            .as_object_mut()
+            .expect("target object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherImplementationTargetV1>(unknown_target)
+                .is_err()
+        );
+
+        let mut changed_administrator = context.clone();
+        changed_administrator.runner_administrator.authority_id = "another-administrator".into();
+        changed_administrator.runner_administrator.identity =
+            runner_administrator_authority_v1_identity(&changed_administrator.runner_administrator)
+                .expect("changed administrator identity");
+        assert_ne!(
+            protected_launcher_authority_context_v1_identity(&changed_administrator)
+                .expect("changed context identity"),
+            context.identity
+        );
+
+        let mut noncanonical_administrator = context.runner_administrator.clone();
+        noncanonical_administrator.authority_id = "Runner-Administrator".into();
+        assert_eq!(
+            runner_administrator_authority_v1_identity(&noncanonical_administrator),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed_instance = context.clone();
+        changed_instance.runner_administrator.authority_instance_id =
+            URL_SAFE_NO_PAD.encode([2_u8; 32]);
+        changed_instance.runner_administrator.identity =
+            runner_administrator_authority_v1_identity(&changed_instance.runner_administrator)
+                .expect("changed authority instance identity");
+        assert_ne!(
+            protected_launcher_authority_context_v1_identity(&changed_instance)
+                .expect("changed authority context identity"),
+            context.identity
+        );
+        for malformed_instance in [
+            URL_SAFE_NO_PAD.encode([0_u8; 32]),
+            URL_SAFE_NO_PAD.encode([1_u8; 31]),
+            URL_SAFE_NO_PAD.encode([1_u8; 33]),
+            format!("{}=", URL_SAFE_NO_PAD.encode([1_u8; 32])),
+            format!("*{}", "A".repeat(42)),
+            "B".repeat(43),
+        ] {
+            let mut malformed_authority = context.runner_administrator.clone();
+            malformed_authority.authority_instance_id = malformed_instance;
+            assert_eq!(
+                runner_administrator_authority_v1_identity(&malformed_authority),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        let mut changed_subject = context.clone();
+        changed_subject.implementation_subject.ota_artifact_identity =
+            format!("sha256:{}", "9".repeat(64));
+        changed_subject.implementation_subject.identity =
+            protected_launcher_implementation_subject_v1_identity(
+                &changed_subject.implementation_subject,
+            )
+            .expect("changed subject identity");
+        assert_ne!(
+            protected_launcher_authority_context_v1_identity(&changed_subject)
+                .expect("changed context identity"),
+            context.identity
+        );
+
+        let mut unsupported_target = context.implementation_subject.clone();
+        unsupported_target.target.architecture = "aarch64".into();
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&unsupported_target),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut invalid_revision = context.implementation_subject.clone();
+        invalid_revision.protocol_source_revision = "0".repeat(40);
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&invalid_revision),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn protected_launcher_dynamic_context_identities_are_exact() {
+        let nonce = [7_u8; 32];
+        assert_ne!(
+            protected_launcher_invocation_nonce_v1_identity(&nonce)
+                .expect("invocation nonce identity"),
+            protected_launcher_capability_observation_nonce_commitment_v1(&nonce)
+                .expect("public challenge nonce commitment")
+        );
+        assert_eq!(
+            protected_launcher_invocation_nonce_v1_identity(&nonce[..31]),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let boot_id = "123e4567-e89b-12d3-a456-426614174000";
+        assert!(protected_launcher_boot_v1_identity(boot_id).is_ok());
+        for malformed in [
+            "123E4567-e89b-12d3-a456-426614174000",
+            "123e4567e89b12d3a456426614174000",
+            "123e4567-e89b-12d3-a456-42661417400g",
+            " 123e4567-e89b-12d3-a456-426614174000",
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            assert_eq!(
+                protected_launcher_boot_v1_identity(malformed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
     }
 
     #[test]

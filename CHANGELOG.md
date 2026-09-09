@@ -26,6 +26,14 @@
 
 ## Unreleased
 
+- Add closed, domain-separated records for the independently administered runner authority, exact
+  protected Launcher/Ota implementation subject, and their future installer-owned authority
+  context. The administrator identity includes a canonical 256-bit instance identifier so unrelated
+  authorities cannot alias through a shared label. Add distinct 256-bit invocation-nonce and
+  non-nil canonical Linux boot-UUID identity domains. Protocol validates structure and semantic
+  identity only; it does not install authority, observe procfs, generate runtime nonces, reconcile
+  executables, or activate a Launcher service route.
+
 - Add the closed protected-capability observation challenge, public projection, and administrator-
   installed verifier records. The challenge binds one fresh workflow invocation with a five-minute
   maximum lifetime. The projection hashes an unsigned JCS payload and signs its identity under a

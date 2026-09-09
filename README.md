@@ -43,6 +43,10 @@ This repository owns:
 - an additive protected-launcher capability record binding one exact request, launcher
   installation, root service, systemd/cgroup invocation, unprivileged Ota subject, and the closed
   retained-descriptor set without carrying paths, file content, tokens, or provider responses;
+- closed administrator-authority, protected Launcher/Ota implementation-subject, and authority-
+  context records, including a 256-bit administrator-generated authority-instance identifier, plus
+  domain-separated invocation-nonce and non-nil canonical Linux boot identities for a future
+  installer-owned capability context;
 - closed challenge, public capability-observation projection, and administrator-installed verifier
   records that bind one fresh workflow invocation without publishing the raw protected-capability
   identity or its transitive private correlation inputs;
@@ -60,7 +64,9 @@ verification policy, approval workflows, broker persistence, transport credentia
 receipt creation, protected archive storage, or semantic archive verification. Those remain with
 Ota Core, the authority launcher, and the chosen broker implementation. A structurally valid public
 projection is neither authority nor evidence of provider contact, delivery, execution approval, or
-cleanup.
+cleanup. The authority-context records are canonical structural truth only: Protocol does not
+install them, establish filesystem ownership, observe procfs, generate runtime nonces, or reconcile
+installed executables.
 
 ## Wire sequence
 
