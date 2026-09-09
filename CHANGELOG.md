@@ -30,8 +30,10 @@
   reinterpreting V3. V4 retains `ProtectProc=invisible` and `ProcSubset=pid`, binds one named
   read-only systemd-manager-opened boot-ID file and one named launcher listener, and requires the
   V4 public capability-observation class. Historical V3 implementation subjects remain valid only
-  with the exact V3 profile identity; V3/V4 class or profile substitution refuses. Protocol defines
-  this structure only and does not open descriptors, launch processes, or activate provider access.
+  with the exact V3 profile identity. The existing V3 attestation envelope accepts either exact
+  profile and reconciles its required observation set; unknown or cross-profile substitution
+  refuses. Protocol defines this structure only and does not open descriptors, launch processes,
+  or activate provider access.
 
 - Add closed, domain-separated records for the independently administered runner authority, exact
   protected Launcher/Ota implementation subject, and their future installer-owned authority

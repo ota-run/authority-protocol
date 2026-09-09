@@ -4335,7 +4335,7 @@ fn validate_systemd_protected_launcher_instance_v3_foundation(
     validate_systemd_protected_launcher_instance_foundation(instance, true)
 }
 
-/// Derive the nested foundation identity for the exact V3 launcher and V2 job-principal branch.
+/// Derive the nested foundation identity for a current launcher profile and V2 job-principal.
 /// Legacy callers must continue using `systemd_protected_launcher_instance_identity`.
 pub fn systemd_protected_launcher_instance_v3_foundation_identity(
     instance: &SystemdProtectedLauncherInstanceEvidenceV1,
@@ -4353,7 +4353,7 @@ fn validate_systemd_protected_launcher_instance_foundation(
     let mapping_identity = launcher_principal_mapping_identity(&instance.principal_mapping)?;
     let posture_identity = ota_process_posture_identity(&instance.process_posture)?;
     let launcher_profiles = if v3 {
-        vec![systemd_launcher_profile_v3()]
+        vec![systemd_launcher_profile_v3(), systemd_launcher_profile_v4()]
     } else {
         vec![systemd_launcher_profile_v1(), systemd_launcher_profile_v2()]
     };
@@ -4432,10 +4432,17 @@ fn validate_systemd_protected_launcher_instance_v2(
             if instance.instance_v1.identity != foundation_identity {
                 return Err(ProtocolError::InvalidRecord);
             }
-            (
-                systemd_launcher_profile_v3(),
-                systemd_job_principal_profile_v2(),
-            )
+            let launcher_profile = [systemd_launcher_profile_v3(), systemd_launcher_profile_v4()]
+                .into_iter()
+                .find(|profile| {
+                    systemd_launcher_profile_identity(profile).as_deref()
+                        == Ok(instance
+                            .instance_v1
+                            .systemd_launcher_profile_identity
+                            .as_str())
+                })
+                .ok_or(ProtocolError::InvalidRecord)?;
+            (launcher_profile, systemd_job_principal_profile_v2())
         }
         _ => return Err(ProtocolError::InvalidRecord),
     };
@@ -4483,8 +4490,13 @@ fn validate_systemd_protected_launcher_instance_v3(
     instance: &SystemdProtectedLauncherInstanceEvidenceV2,
 ) -> Result<(), ProtocolError> {
     validate_systemd_protected_launcher_instance_v2(instance)?;
-    let launcher_profile_identity =
-        systemd_launcher_profile_identity(&systemd_launcher_profile_v3())?;
+    let launcher_profile_identity = [systemd_launcher_profile_v3(), systemd_launcher_profile_v4()]
+        .into_iter()
+        .find_map(|profile| {
+            let identity = systemd_launcher_profile_identity(&profile).ok()?;
+            (identity == instance.instance_v1.systemd_launcher_profile_identity).then_some(identity)
+        })
+        .ok_or(ProtocolError::InvalidRecord)?;
     let job_profile_identity =
         systemd_job_principal_profile_identity(&systemd_job_principal_profile_v2())?;
     if instance.schema_version != 3
@@ -8080,6 +8092,38 @@ mod tests {
         };
         complete_v3.identity = systemd_protected_launcher_instance_v2_identity(&complete_v3)
             .expect("complete v3 launcher instance identity");
+        let launcher_profile_v4 = systemd_launcher_profile_v4();
+        let mut complete_v4 = complete_v3.clone();
+        complete_v4.instance_v1.systemd_launcher_profile_identity =
+            systemd_launcher_profile_identity(&launcher_profile_v4)
+                .expect("v4 launcher profile identity");
+        complete_v4.instance_v1.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(&complete_v4.instance_v1)
+                .expect("v4 launcher foundation identity");
+        complete_v4.launcher_observations = launcher_profile_v4
+            .evidence_sources
+            .into_iter()
+            .map(|source| SystemdLauncherObservation {
+                source,
+                state: RuntimeBoundaryObservationState::Verified,
+                reason_code: String::from("verified_by_systemd_protected_launcher"),
+                evidence_identity: Some(format!("sha256:{}", "5".repeat(64))),
+            })
+            .collect();
+        complete_v4.identity = systemd_protected_launcher_instance_v2_identity(&complete_v4)
+            .expect("complete v4 launcher instance identity");
+        validate_systemd_protected_launcher_instance_v3(&complete_v4)
+            .expect("v4 profile remains valid in the v3 attestation envelope");
+        let mut unknown_profile = complete_v4.clone();
+        unknown_profile
+            .instance_v1
+            .systemd_launcher_profile_identity = format!("sha256:{}", "f".repeat(64));
+        assert_eq!(
+            systemd_protected_launcher_instance_v3_foundation_identity(
+                &unknown_profile.instance_v1
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
         let mut stripped_current = complete_v3.clone();
         stripped_current.launcher_observations[0].evidence_identity = None;
         assert!(systemd_protected_launcher_instance_v2_identity(&stripped_current).is_err());
