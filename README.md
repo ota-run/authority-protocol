@@ -40,6 +40,8 @@ This repository owns:
 - additive runtime-boundary attestation v2 types and canonical protected-launcher profiles;
 - immutable principal-mapping, Ota process-posture, and systemd launcher-profile records used by
   the production protected-launcher adapter;
+- immutable systemd Launcher V3 and V4 profiles, where V4 retains the V3 procfs restriction and
+  adds exact named listener and manager-opened read-only boot-ID descriptor roles;
 - an additive protected-launcher capability record binding one exact request, launcher
   installation, root service, systemd/cgroup invocation, unprivileged Ota subject, and the closed
   retained-descriptor set without carrying paths, file content, tokens, or provider responses;
@@ -265,7 +267,11 @@ adapter can execute:
   transition clears the ambient capability before selected code can execute. The profile also
   makes effective systemd runtime configuration read-only inside the launcher boundary and replaces
   `/proc/net/unix` path observation with protected socket metadata and descriptor identity. Its profile identity is
-  `sha256:b5853a12e72c4ca32b0f93a38bc8f1097c7809039b58449f67fcf9019d0ea480`.
+  `sha256:1d0ef44c24b6ec21dc0c462edd52c5197ae35a4a1728a98cd93b92d6f106dfaf`.
+- `ota.authority-launcher.systemd/v4` preserves V3's procfs restrictions and adds exactly one
+  manager-opened read-only boot-ID descriptor plus one canonical launcher-listener descriptor name.
+  Its profile identity is
+  `sha256:bdac5f965aa56d44de8581e194ac0364b2d4c98183fff0cbb223574fd78197a8`.
 - `ota.authority-job-principal.systemd/v1` fixes the ordered job-peer, execution-principal,
   privilege, process-containment, and process-inspection requirements. Its profile identity is
   `sha256:e69ef375070bbb4f5616ba46b6f29b9a987372909016d1a1dfa40a5d4daae93d`.

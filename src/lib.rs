@@ -46,6 +46,7 @@ pub const SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1: &str = "ota-authority-history/s
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V1: &str = "ota.authority-launcher.systemd/v1";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V2: &str = "ota.authority-launcher.systemd/v2";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V3: &str = "ota.authority-launcher.systemd/v3";
+pub const SYSTEMD_LAUNCHER_PROFILE_ID_V4: &str = "ota.authority-launcher.systemd/v4";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1: &str = "ota.authority-job-principal.systemd/v1";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V2: &str = "ota.authority-job-principal.systemd/v2";
 pub const SYSTEMD_ATTESTOR_SOCKET_PATH_V1: &str = "/run/ota/authority-attestor.sock";
@@ -2284,8 +2285,15 @@ pub fn protected_launcher_implementation_subject_v1_identity(
         || subject.target.os != "linux"
         || subject.target.architecture != "x86_64"
         || subject.target.execution_mode != "native"
-        || subject.target.launcher_class != "systemd_protected_launcher_v3"
     {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let expected_profile = match subject.target.launcher_class.as_str() {
+        "systemd_protected_launcher_v3" => systemd_launcher_profile_v3(),
+        "systemd_protected_launcher_v4" => systemd_launcher_profile_v4(),
+        _ => return Err(ProtocolError::InvalidRecord),
+    };
+    if subject.launcher_profile_identity != systemd_launcher_profile_identity(&expected_profile)? {
         return Err(ProtocolError::InvalidRecord);
     }
     let mut canonical = subject.clone();
@@ -2602,7 +2610,7 @@ pub fn protected_launcher_capability_observation_projection_v1_identity(
         || payload.target.environment != "self_hosted"
         || payload.target.os != "linux"
         || payload.target.architecture != "x64"
-        || payload.capability_class != "systemd_protected_launcher_v3"
+        || payload.capability_class != "systemd_protected_launcher_v4"
         || !is_canonical_semver(&payload.runner_version)
         || !is_sha256_identity(&payload.signing_key_identity)
     {
@@ -4074,6 +4082,24 @@ pub fn systemd_launcher_profile_v3() -> SystemdLauncherProfileDefinitionV1 {
     profile
 }
 
+/// Process-inspection profile with one manager-opened boot-ID descriptor.
+///
+/// V4 preserves V3's procfs namespace and adds two named inherited descriptor roles so the
+/// Launcher can retain the kernel boot identity without widening the selected child's procfs view.
+pub fn systemd_launcher_profile_v4() -> SystemdLauncherProfileDefinitionV1 {
+    let mut profile = systemd_launcher_profile_v3();
+    profile.profile_id = SYSTEMD_LAUNCHER_PROFILE_ID_V4.into();
+    profile.service_settings.push(systemd_setting(
+        "OpenFile",
+        "/proc/sys/kernel/random/boot_id:ota-boot-id:read-only",
+    ));
+    profile.socket_settings.push(systemd_setting(
+        "FileDescriptorName",
+        "ota-launcher-listener",
+    ));
+    profile
+}
+
 pub fn systemd_launcher_profile_by_id(
     profile_id: &str,
 ) -> Option<SystemdLauncherProfileDefinitionV1> {
@@ -4081,6 +4107,7 @@ pub fn systemd_launcher_profile_by_id(
         SYSTEMD_LAUNCHER_PROFILE_ID_V1 => Some(systemd_launcher_profile_v1()),
         SYSTEMD_LAUNCHER_PROFILE_ID_V2 => Some(systemd_launcher_profile_v2()),
         SYSTEMD_LAUNCHER_PROFILE_ID_V3 => Some(systemd_launcher_profile_v3()),
+        SYSTEMD_LAUNCHER_PROFILE_ID_V4 => Some(systemd_launcher_profile_v4()),
         _ => None,
     }
 }
@@ -4746,7 +4773,10 @@ mod tests {
             protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
             minimum_core_version: "1.6.28".into(),
             maximum_exclusive_core_version: "1.7.0".into(),
-            launcher_profile_identity: digest('5'),
+            launcher_profile_identity: systemd_launcher_profile_identity(
+                &systemd_launcher_profile_v3(),
+            )
+            .expect("launcher profile identity"),
             target: ProtectedLauncherImplementationTargetV1 {
                 environment: "self_hosted".into(),
                 os: "linux".into(),
@@ -4893,7 +4923,7 @@ mod tests {
                 os: "linux".into(),
                 architecture: "x64".into(),
             },
-            capability_class: "systemd_protected_launcher_v3".into(),
+            capability_class: "systemd_protected_launcher_v4".into(),
             runner_version: "2.337.0".into(),
             signing_key_identity: verifier.key_identity,
         };
@@ -5091,6 +5121,26 @@ mod tests {
             protected_launcher_implementation_subject_v1_identity(&unsupported_target),
             Err(ProtocolError::InvalidRecord)
         );
+        let mut substituted_profile = context.implementation_subject.clone();
+        substituted_profile.target.launcher_class = "systemd_protected_launcher_v4".into();
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&substituted_profile),
+            Err(ProtocolError::InvalidRecord)
+        );
+        substituted_profile.launcher_profile_identity =
+            systemd_launcher_profile_identity(&systemd_launcher_profile_v4())
+                .expect("v4 launcher profile identity");
+        assert!(
+            protected_launcher_implementation_subject_v1_identity(&substituted_profile).is_ok()
+        );
+        let mut reverse_substitution = context.implementation_subject.clone();
+        reverse_substitution.launcher_profile_identity =
+            systemd_launcher_profile_identity(&systemd_launcher_profile_v4())
+                .expect("v4 launcher profile identity");
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&reverse_substitution),
+            Err(ProtocolError::InvalidRecord)
+        );
         let mut invalid_revision = context.implementation_subject.clone();
         invalid_revision.protocol_source_revision = "0".repeat(40);
         assert_eq!(
@@ -5187,7 +5237,7 @@ mod tests {
         );
         assert_eq!(
             projection.projection_identity,
-            "sha256:baa4a23e06077b7c8d43c196ba5b45d4ba37faf8299f4a49fed939c545a7cd8e"
+            "sha256:df73f60bb069260f95e15ca057612e1909ea87afb0c8b9e24d315bd1a619594d"
         );
         assert_eq!(
             verifier.key_identity,
@@ -5351,6 +5401,14 @@ mod tests {
         );
         assert_eq!(
             validate_protected_launcher_capability_observation_signing_request_v1(&changed_payload),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut historical_class = signing_request.clone();
+        historical_class.payload.capability_class = "systemd_protected_launcher_v3".into();
+        assert_eq!(
+            protected_launcher_capability_observation_projection_v1_identity(
+                &historical_class.payload,
+            ),
             Err(ProtocolError::InvalidRecord)
         );
         let original_response = ProtectedLauncherCapabilityObservationSigningResponseV1 {
@@ -7572,6 +7630,7 @@ mod tests {
         let launcher = systemd_launcher_profile_v1();
         let separated_producer = systemd_launcher_profile_v2();
         let process_inspection = systemd_launcher_profile_v3();
+        let boot_observation = systemd_launcher_profile_v4();
         let principal = systemd_job_principal_profile_v1();
         let systemd_principal = systemd_job_principal_profile_v2();
 
@@ -7612,6 +7671,47 @@ mod tests {
             systemd_launcher_profile_by_id(SYSTEMD_LAUNCHER_PROFILE_ID_V3),
             Some(process_inspection.clone())
         );
+        assert_eq!(boot_observation.profile_id, SYSTEMD_LAUNCHER_PROFILE_ID_V4);
+        assert!(boot_observation.service_settings.iter().any(|setting| {
+            setting.name == "OpenFile"
+                && setting.value == "/proc/sys/kernel/random/boot_id:ota-boot-id:read-only"
+        }));
+        assert!(boot_observation.socket_settings.iter().any(|setting| {
+            setting.name == "FileDescriptorName" && setting.value == "ota-launcher-listener"
+        }));
+        assert!(
+            boot_observation
+                .service_settings
+                .iter()
+                .any(|setting| { setting.name == "ProcSubset" && setting.value == "pid" })
+        );
+        assert_ne!(
+            systemd_launcher_profile_identity(&process_inspection)
+                .expect("v3 launcher profile identity"),
+            systemd_launcher_profile_identity(&boot_observation)
+                .expect("v4 launcher profile identity")
+        );
+        assert_eq!(
+            systemd_launcher_profile_by_id(SYSTEMD_LAUNCHER_PROFILE_ID_V4),
+            Some(boot_observation.clone())
+        );
+        let mut v4_without_additions = boot_observation.clone();
+        v4_without_additions.profile_id = SYSTEMD_LAUNCHER_PROFILE_ID_V3.into();
+        assert_eq!(
+            v4_without_additions
+                .service_settings
+                .pop()
+                .map(|setting| setting.name),
+            Some("OpenFile".into())
+        );
+        assert_eq!(
+            v4_without_additions
+                .socket_settings
+                .pop()
+                .map(|setting| setting.name),
+            Some("FileDescriptorName".into())
+        );
+        assert_eq!(v4_without_additions, process_inspection);
         assert_eq!(principal.schema_version, 1);
         assert_eq!(principal.profile_id, SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1);
         assert_eq!(principal.requirements.len(), 18);
@@ -7649,6 +7749,11 @@ mod tests {
             systemd_launcher_profile_identity(&process_inspection)
                 .expect("process-inspection profile identity"),
             "sha256:1d0ef44c24b6ec21dc0c462edd52c5197ae35a4a1728a98cd93b92d6f106dfaf"
+        );
+        assert_eq!(
+            systemd_launcher_profile_identity(&boot_observation)
+                .expect("boot-observation profile identity"),
+            "sha256:bdac5f965aa56d44de8581e194ac0364b2d4c98183fff0cbb223574fd78197a8"
         );
         assert_eq!(
             principal_identity,
