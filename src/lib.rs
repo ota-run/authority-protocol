@@ -1517,7 +1517,7 @@ pub struct SystemdProtectedLauncherInstanceEvidenceV1 {
 }
 
 /// Complete systemd protected-launcher evidence. Schema 2 preserves the legacy V1/V2 profile
-/// branch; schema 3 exclusively carries the V3 launcher and V2 job-principal profiles.
+/// branch; schema 3 carries the current V3/V4 launcher and V2 job-principal profiles.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SystemdProtectedLauncherInstanceEvidenceV2 {
@@ -6242,6 +6242,73 @@ mod tests {
         assert_eq!(
             validate_protected_launcher_capability_v1(&capability, &evidence),
             Ok(())
+        );
+
+        let launcher_profile_v4 = systemd_launcher_profile_v4();
+        let launcher_profile_v4_identity = systemd_launcher_profile_identity(&launcher_profile_v4)
+            .expect("v4 launcher profile identity");
+        let mut launcher_instance_v4 = launcher_instance.clone();
+        launcher_instance_v4
+            .instance_v1
+            .systemd_launcher_profile_identity = launcher_profile_v4_identity.clone();
+        launcher_instance_v4.instance_v1.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(
+                &launcher_instance_v4.instance_v1,
+            )
+            .expect("v4 launcher foundation identity");
+        launcher_instance_v4.identity =
+            systemd_protected_launcher_instance_v2_identity(&launcher_instance_v4)
+                .expect("v4 launcher instance identity");
+
+        let mut v3_capability_with_v4_instance = capability.clone();
+        v3_capability_with_v4_instance.protected_launcher_instance_identity =
+            launcher_instance_v4.identity.clone();
+        v3_capability_with_v4_instance.identity =
+            protected_launcher_capability_v1_identity(&v3_capability_with_v4_instance)
+                .expect("recomputed V3 capability with substituted V4 instance");
+        let v3_evidence_with_v4_instance = ProtectedLauncherCapabilityEvidenceV1 {
+            launcher_instance: &launcher_instance_v4,
+            ..evidence
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(
+                &v3_capability_with_v4_instance,
+                &v3_evidence_with_v4_instance,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut capability_v4 = capability.clone();
+        capability_v4.launcher_profile_identity = launcher_profile_v4_identity.clone();
+        capability_v4.protected_launcher_instance_identity = launcher_instance_v4.identity.clone();
+        capability_v4.identity = protected_launcher_capability_v1_identity(&capability_v4)
+            .expect("v4 capability identity");
+        let evidence_v4 = ProtectedLauncherCapabilityEvidenceV1 {
+            launcher_instance: &launcher_instance_v4,
+            launcher_profile_identity: launcher_profile_v4_identity.as_str(),
+            ..evidence
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&capability_v4, &evidence_v4),
+            Ok(())
+        );
+
+        let mut v4_capability_with_v3_instance = capability_v4;
+        v4_capability_with_v3_instance.protected_launcher_instance_identity =
+            launcher_instance.identity.clone();
+        v4_capability_with_v3_instance.identity =
+            protected_launcher_capability_v1_identity(&v4_capability_with_v3_instance)
+                .expect("recomputed V4 capability with substituted V3 instance");
+        let v4_evidence_with_v3_instance = ProtectedLauncherCapabilityEvidenceV1 {
+            launcher_instance: &launcher_instance,
+            ..evidence_v4
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(
+                &v4_capability_with_v3_instance,
+                &v4_evidence_with_v3_instance,
+            ),
+            Err(ProtocolError::InvalidRecord)
         );
 
         let mut forged_child = child.clone();
