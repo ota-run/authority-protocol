@@ -26,6 +26,14 @@
 
 ## Unreleased
 
+- Add the closed same-execution secret-delivery transaction-binding exchange. The selected Core
+  child carries only the exact Launcher request identity retained in its startup continuation.
+  Launcher-owned reconciliation binds private capability evidence before returning the binding and
+  signed public projection; Core-visible reconciliation separately binds the response to its
+  retained request and independently loaded verifier and installation identities. Protocol does
+  not perform signature policy, open provider authority, contact a provider, deliver a secret, or
+  activate execution.
+
 - Add closed protected secret-delivery verifier-store and binding-bundle records. The root-owned
   verifier store admits exactly one public verification key and pins exactly one current bundle generation;
   the bundle binds only a bounded opaque payload identity and a domain-separated Ed25519 signature
