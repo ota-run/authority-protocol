@@ -55,20 +55,26 @@ This repository owns:
 - a closed protected Launcher-to-Attestor signing envelope that binds the exact private capability,
   public payload, producer binding, verifier, and projection identity while returning only the
   signed public projection, with cross-record reconciliation against the retained request;
+- closed protected secret-delivery verifier-store and binding-bundle records. The store admits
+  exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an
+  opaque, bounded payload identity and domain-separated Ed25519 signature envelope without making
+  provider bindings, paths, or secret material public;
 - the bounded Linux systemd-launcher client/service request, output, and terminal frames;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
 - compatibility and adversarial conformance tests.
 
-It defines canonical projection signature bytes but does not own repository contracts,
+It defines canonical projection and binding-bundle signature bytes but does not own repository contracts,
 semantic-scope derivation, admission policy, signing keys, challenge replay persistence, signature
-verification policy, approval workflows, broker persistence, transport credentials, execution,
+verification policy, protected-store loading, approval workflows, broker persistence, transport credentials, execution,
 receipt creation, protected archive storage, or semantic archive verification. Those remain with
 Ota Core, the authority launcher, and the chosen broker implementation. A structurally valid public
 projection is neither authority nor evidence of provider contact, delivery, execution approval, or
 cleanup. The authority-context records are canonical structural truth only: Protocol does not
 install them, establish filesystem ownership, observe procfs, generate runtime nonces, or reconcile
-installed executables.
+installed executables. A structurally valid binding bundle is likewise not provider authority and
+does not establish cryptographic verification, current protected-store bytes, replay state, provider
+contact, delivery, execution approval, receipt, or assurance.
 
 ## Wire sequence
 

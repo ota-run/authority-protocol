@@ -66,6 +66,8 @@ pub const MAX_HISTORY_ENTRY_COUNT_V1: usize = 256;
 pub const MAX_HISTORY_CHUNK_PAYLOAD_BYTES_V1: usize = 15 * 1024;
 pub const MAX_HISTORY_RESPONSE_BYTES_V1: u64 = 16 * 1024 * 1024;
 pub const MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1: usize = 64 * 1024;
+/// Leaves room for the enclosing canonical signed bundle within one protected store file.
+pub const MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1: usize = 32 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
 pub const ATTESTATION_RESPONSE: &str = "attestation_response";
@@ -108,8 +110,16 @@ pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING: &str =
     "protected_launcher_secret_delivery_transaction_binding";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER: &str =
     "protected_launcher_capability_projection_verifier";
+pub const PROTECTED_SECRET_DELIVERY_VERIFIER_STORE: &str =
+    "protected_secret_delivery_verifier_store";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE: &str =
+    "protected_secret_delivery_binding_bundle";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER: &str =
+    "protected_secret_delivery_binding_bundle_verifier";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1: &str =
     "protected_launcher_capability_observation_projection";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_USAGE_V1: &str =
+    "protected_secret_delivery_binding_bundle";
 pub const LAUNCHER_STARTUP_CONTINUATION: &str = "launcher_startup_continuation";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST: &str = "launcher_attestation_signing_request";
 pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE: &str = "launcher_attestation_signing_response";
@@ -211,6 +221,18 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1: 
     b"ota.protected-launcher-capability-projection-verifier.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_KEY_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-projection-key.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_VERIFIER_STORE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.verifier-store.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-verifier.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-payload.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-key.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-signature.v1\0";
 pub const LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.startup-continuation.v1\0";
 pub const AUTHORIZATION_DECISION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
@@ -735,6 +757,56 @@ pub struct ProtectedLauncherCapabilityProjectionVerifierV1 {
     pub key_identity: String,
     pub key_usage: String,
     pub signature_domain: String,
+}
+
+/// Administrator-controlled verifier store that admits exactly one current secret-delivery
+/// binding bundle. The independent administrator owns installation, Launcher owns retained
+/// descriptor loading and signature verification, and Core owns semantic binding parsing.
+/// Protocol owns only this closed record's structural and semantic reconciliation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSecretDeliveryVerifierStoreV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub authority_id: String,
+    pub generation: u64,
+    pub not_before_unix_seconds: u64,
+    pub not_after_unix_seconds: u64,
+    pub verifiers: Vec<ProtectedSecretDeliveryBindingBundleVerifierV1>,
+    pub active_binding_bundle_identity: String,
+    pub active_binding_bundle_generation: u64,
+}
+
+/// One admitted verifier whose key is restricted to binding-bundle signatures.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSecretDeliveryBindingBundleVerifierV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub public_key: String,
+    pub key_identity: String,
+    pub key_usage: String,
+    pub signature_domain: String,
+}
+
+/// Signed, opaque authority payload. The payload remains exact protected bytes until Core's
+/// later owner-specific parser rederives provider binding and profile semantics.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSecretDeliveryBindingBundleV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub authority_id: String,
+    pub generation: u64,
+    pub issued_at_unix_seconds: u64,
+    pub expires_at_unix_seconds: u64,
+    pub verifier_identity: String,
+    pub payload: String,
+    pub payload_identity: String,
+    pub signature: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -2887,6 +2959,202 @@ pub fn validate_protected_launcher_capability_projection_verifier_v1(
     verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
 ) -> Result<(), ProtocolError> {
     if verifier.identity != protected_launcher_capability_projection_verifier_v1_identity(verifier)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_secret_delivery_binding_bundle_key_identity_v1(
+    public_key: &str,
+) -> Result<String, ProtocolError> {
+    if !is_canonical_ed25519_public_key(public_key) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_IDENTITY_DOMAIN_V1,
+        &public_key,
+    )
+}
+
+pub fn protected_secret_delivery_binding_bundle_verifier_v1_identity(
+    verifier: &ProtectedSecretDeliveryBindingBundleVerifierV1,
+) -> Result<String, ProtocolError> {
+    let signature_domain =
+        std::str::from_utf8(PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    if verifier.schema_version != 1
+        || verifier.record_kind != PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER
+        || !is_canonical_ed25519_public_key(&verifier.public_key)
+        || verifier.key_identity
+            != protected_secret_delivery_binding_bundle_key_identity_v1(&verifier.public_key)?
+        || verifier.key_usage != PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_USAGE_V1
+        || verifier.signature_domain != signature_domain
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = verifier.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_secret_delivery_binding_bundle_verifier_v1(
+    verifier: &ProtectedSecretDeliveryBindingBundleVerifierV1,
+) -> Result<(), ProtocolError> {
+    if verifier.identity != protected_secret_delivery_binding_bundle_verifier_v1_identity(verifier)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_secret_delivery_verifier_store_v1_identity(
+    store: &ProtectedSecretDeliveryVerifierStoreV1,
+) -> Result<String, ProtocolError> {
+    if store.schema_version != 1
+        || store.record_kind != PROTECTED_SECRET_DELIVERY_VERIFIER_STORE
+        || !is_bounded_label(&store.authority_id, 128)
+        || store.generation == 0
+        || store.not_before_unix_seconds == 0
+        || store.not_after_unix_seconds <= store.not_before_unix_seconds
+        || store.verifiers.len() != 1
+        || store.active_binding_bundle_generation == 0
+        || !is_sha256_identity(&store.active_binding_bundle_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let verifier = &store.verifiers[0];
+    validate_protected_secret_delivery_binding_bundle_verifier_v1(verifier)?;
+    let mut canonical = store.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_VERIFIER_STORE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_secret_delivery_verifier_store_v1(
+    store: &ProtectedSecretDeliveryVerifierStoreV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if store.identity != protected_secret_delivery_verifier_store_v1_identity(store)?
+        || observed_at_unix_seconds < store.not_before_unix_seconds
+        || observed_at_unix_seconds > store.not_after_unix_seconds
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_secret_delivery_binding_bundle_payload_bytes_v1(
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+) -> Result<Vec<u8>, ProtocolError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&bundle.payload)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if bytes.is_empty()
+        || bytes.len() > MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1
+        || URL_SAFE_NO_PAD.encode(&bytes) != bundle.payload
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(bytes)
+}
+
+pub fn protected_secret_delivery_binding_bundle_payload_v1_identity(
+    payload: &[u8],
+) -> Result<String, ProtocolError> {
+    if payload.is_empty()
+        || payload.len() > MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_IDENTITY_DOMAIN_V1,
+        payload,
+    )))
+}
+
+pub fn protected_secret_delivery_binding_bundle_v1_identity(
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+) -> Result<String, ProtocolError> {
+    if bundle.schema_version != 1
+        || bundle.record_kind != PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE
+        || !is_bounded_label(&bundle.authority_id, 128)
+        || bundle.generation == 0
+        || bundle.issued_at_unix_seconds == 0
+        || bundle.expires_at_unix_seconds <= bundle.issued_at_unix_seconds
+        || !is_sha256_identity(&bundle.verifier_identity)
+        || !is_canonical_ed25519_signature(&bundle.signature)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let payload = protected_secret_delivery_binding_bundle_payload_bytes_v1(bundle)?;
+    if bundle.payload_identity
+        != protected_secret_delivery_binding_bundle_payload_v1_identity(&payload)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = bundle.clone();
+    canonical.identity.clear();
+    canonical.signature.clear();
+    if serde_jcs::to_vec(bundle)
+        .map_err(|_| ProtocolError::Canonicalization)?
+        .len()
+        > MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+/// Exact bytes that the admitted verifier signs for an authority bundle.
+pub fn protected_secret_delivery_binding_bundle_signature_message_v1(
+    bundle_identity: &str,
+) -> Result<Vec<u8>, ProtocolError> {
+    if !is_sha256_identity(bundle_identity) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(domain_separated(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1,
+        bundle_identity.as_bytes(),
+    ))
+}
+
+pub fn validate_protected_secret_delivery_binding_bundle_v1(
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+) -> Result<(), ProtocolError> {
+    if bundle.identity != protected_secret_delivery_binding_bundle_v1_identity(bundle)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    protected_secret_delivery_binding_bundle_signature_message_v1(bundle.identity.as_str())?;
+    Ok(())
+}
+
+/// Reconciles the root-owned active verifier store to exactly one signed binding bundle.
+/// Cryptographic signature verification and descriptor re-observation remain with Launcher/Core.
+pub fn reconcile_protected_secret_delivery_authority_bundle_v1(
+    store: &ProtectedSecretDeliveryVerifierStoreV1,
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    validate_protected_secret_delivery_verifier_store_v1(store, observed_at_unix_seconds)?;
+    validate_protected_secret_delivery_binding_bundle_v1(bundle)?;
+    let verifier = &store.verifiers[0];
+    if bundle.authority_id != store.authority_id
+        || bundle.generation != store.active_binding_bundle_generation
+        || bundle.identity != store.active_binding_bundle_identity
+        || bundle.verifier_identity != verifier.identity
+        || bundle.issued_at_unix_seconds < store.not_before_unix_seconds
+        || bundle.expires_at_unix_seconds > store.not_after_unix_seconds
+        || observed_at_unix_seconds < bundle.issued_at_unix_seconds
+        || observed_at_unix_seconds > bundle.expires_at_unix_seconds
     {
         return Err(ProtocolError::InvalidRecord);
     }
@@ -5135,6 +5403,72 @@ mod tests {
         verifier
     }
 
+    fn secret_delivery_binding_bundle_verifier() -> ProtectedSecretDeliveryBindingBundleVerifierV1 {
+        let public_key = "A".repeat(43);
+        let mut verifier = ProtectedSecretDeliveryBindingBundleVerifierV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER.into(),
+            identity: String::new(),
+            key_identity: protected_secret_delivery_binding_bundle_key_identity_v1(&public_key)
+                .expect("key identity"),
+            public_key,
+            key_usage: PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_USAGE_V1.into(),
+            signature_domain: std::str::from_utf8(
+                PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1,
+            )
+            .expect("signature domain")
+            .into(),
+        };
+        verifier.identity =
+            protected_secret_delivery_binding_bundle_verifier_v1_identity(&verifier)
+                .expect("verifier identity");
+        verifier
+    }
+
+    fn secret_delivery_binding_bundle() -> ProtectedSecretDeliveryBindingBundleV1 {
+        let payload = URL_SAFE_NO_PAD.encode(br#"{\"schema_version\":1,\"bindings\":[]}"#);
+        let payload_bytes = URL_SAFE_NO_PAD.decode(&payload).expect("payload bytes");
+        let verifier = secret_delivery_binding_bundle_verifier();
+        let mut bundle = ProtectedSecretDeliveryBindingBundleV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE.into(),
+            identity: String::new(),
+            authority_id: "ota-secret-delivery".into(),
+            generation: 1,
+            issued_at_unix_seconds: 1_788_800_000,
+            expires_at_unix_seconds: 1_788_803_600,
+            verifier_identity: verifier.identity,
+            payload,
+            payload_identity: protected_secret_delivery_binding_bundle_payload_v1_identity(
+                &payload_bytes,
+            )
+            .expect("payload identity"),
+            signature: "A".repeat(86),
+        };
+        bundle.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&bundle).expect("bundle identity");
+        bundle
+    }
+
+    fn secret_delivery_verifier_store() -> ProtectedSecretDeliveryVerifierStoreV1 {
+        let bundle = secret_delivery_binding_bundle();
+        let mut store = ProtectedSecretDeliveryVerifierStoreV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SECRET_DELIVERY_VERIFIER_STORE.into(),
+            identity: String::new(),
+            authority_id: bundle.authority_id.clone(),
+            generation: 1,
+            not_before_unix_seconds: bundle.issued_at_unix_seconds,
+            not_after_unix_seconds: bundle.expires_at_unix_seconds,
+            verifiers: vec![secret_delivery_binding_bundle_verifier()],
+            active_binding_bundle_identity: bundle.identity,
+            active_binding_bundle_generation: bundle.generation,
+        };
+        store.identity =
+            protected_secret_delivery_verifier_store_v1_identity(&store).expect("store identity");
+        store
+    }
+
     fn capability_observation_projection() -> ProtectedLauncherCapabilityObservationProjectionV1 {
         let challenge = capability_observation_challenge();
         let verifier = capability_projection_verifier();
@@ -5298,6 +5632,230 @@ mod tests {
             verifier: capability_projection_verifier(),
             installation_evidence_identity: format!("sha256:{}", "9".repeat(64)),
         }
+    }
+
+    #[test]
+    fn secret_delivery_authority_bundle_is_closed_current_and_domain_separated() {
+        let store = secret_delivery_verifier_store();
+        let bundle = secret_delivery_binding_bundle();
+        reconcile_protected_secret_delivery_authority_bundle_v1(
+            &store,
+            &bundle,
+            bundle.issued_at_unix_seconds,
+        )
+        .expect("current bundle reconciles");
+        assert_ne!(
+            store.identity, bundle.identity,
+            "store and bundle domains differ"
+        );
+        assert_ne!(
+            bundle.identity, bundle.payload_identity,
+            "bundle binds payload separately"
+        );
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_signature_message_v1(bundle.identity.as_str())
+                .expect("signature message"),
+            b"ota.protected-secret-delivery.binding-bundle-signature.v1\0sha256:5e456d824eafbde3b1a538493ba7c139013d9756a4b4c821772bf353f64533e5"
+                .to_vec()
+        );
+
+        let mut unknown_store = serde_json::to_value(&store).expect("store JSON");
+        unknown_store
+            .as_object_mut()
+            .expect("store object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSecretDeliveryVerifierStoreV1>(unknown_store)
+                .is_err()
+        );
+        let mut unknown_bundle = serde_json::to_value(&bundle).expect("bundle JSON");
+        unknown_bundle
+            .as_object_mut()
+            .expect("bundle object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSecretDeliveryBindingBundleV1>(unknown_bundle)
+                .is_err()
+        );
+        let mut unknown_verifier =
+            serde_json::to_value(&store.verifiers[0]).expect("verifier JSON");
+        unknown_verifier
+            .as_object_mut()
+            .expect("verifier object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSecretDeliveryBindingBundleVerifierV1>(
+                unknown_verifier
+            )
+            .is_err()
+        );
+
+        let mut stale = store.clone();
+        stale.active_binding_bundle_identity = format!("sha256:{}", "f".repeat(64));
+        stale.identity = protected_secret_delivery_verifier_store_v1_identity(&stale)
+            .expect("stale store remains structurally valid");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &stale,
+                &bundle,
+                bundle.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut substituted = bundle.clone();
+        substituted.payload =
+            URL_SAFE_NO_PAD.encode(br#"{\"schema_version\":1,\"bindings\":[\"other\"]}"#);
+        let payload = URL_SAFE_NO_PAD
+            .decode(&substituted.payload)
+            .expect("substituted payload");
+        substituted.payload_identity =
+            protected_secret_delivery_binding_bundle_payload_v1_identity(&payload)
+                .expect("substituted payload identity");
+        substituted.identity = protected_secret_delivery_binding_bundle_v1_identity(&substituted)
+            .expect("substituted bundle identity");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &substituted,
+                substituted.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut duplicate = store.clone();
+        duplicate.verifiers.push(duplicate.verifiers[0].clone());
+        assert_eq!(
+            protected_secret_delivery_verifier_store_v1_identity(&duplicate),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &bundle,
+                bundle.expires_at_unix_seconds + 1,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut different_authority = bundle.clone();
+        different_authority.authority_id = "other-authority".into();
+        different_authority.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&different_authority)
+                .expect("different authority bundle remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &different_authority,
+                different_authority.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut different_generation = bundle.clone();
+        different_generation.generation = 2;
+        different_generation.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&different_generation)
+                .expect("different generation bundle remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &different_generation,
+                different_generation.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut different_verifier = bundle.clone();
+        different_verifier.verifier_identity = format!("sha256:{}", "e".repeat(64));
+        different_verifier.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&different_verifier)
+                .expect("different verifier bundle remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &different_verifier,
+                different_verifier.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut future_store = store.clone();
+        future_store.not_before_unix_seconds += 1;
+        future_store.identity = protected_secret_delivery_verifier_store_v1_identity(&future_store)
+            .expect("future store remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &future_store,
+                &bundle,
+                bundle.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        for payload in [
+            Vec::new(),
+            vec![b'a'; MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1 + 1],
+        ] {
+            assert_eq!(
+                protected_secret_delivery_binding_bundle_payload_v1_identity(&payload),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let maximum_payload =
+            vec![b'a'; MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1];
+        assert!(
+            protected_secret_delivery_binding_bundle_payload_v1_identity(&maximum_payload).is_ok(),
+            "the documented payload maximum remains admissible"
+        );
+        let mut maximum_bundle = bundle.clone();
+        maximum_bundle.payload = URL_SAFE_NO_PAD.encode(&maximum_payload);
+        maximum_bundle.payload_identity =
+            protected_secret_delivery_binding_bundle_payload_v1_identity(&maximum_payload)
+                .expect("maximum payload identity");
+        maximum_bundle.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&maximum_bundle)
+                .expect("maximum payload bundle fits protected store");
+        assert!(
+            serde_jcs::to_vec(&maximum_bundle)
+                .expect("maximum bundle JCS")
+                .len()
+                <= MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1
+        );
+
+        let mut wrong_usage = store.verifiers[0].clone();
+        wrong_usage.key_usage = "other_usage".into();
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_verifier_v1_identity(&wrong_usage),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut wrong_domain = store.verifiers[0].clone();
+        wrong_domain.signature_domain = "other-domain".into();
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_verifier_v1_identity(&wrong_domain),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_key_identity_v1(
+                store.verifiers[0].public_key.as_str()
+            )
+            .expect("key vector"),
+            "sha256:d23ea59f41edf874e937c2d0bccd34e41e1e56c3dd316b85f59f84449af65c62"
+        );
+        assert_eq!(
+            store.verifiers[0].identity,
+            "sha256:9dfb908d864f1125ed090e6fa58915956e1bf8fc60578f71fe4bd35870fa9123"
+        );
+        assert_eq!(
+            bundle.payload_identity,
+            "sha256:37db448e7f68710c266aff6db57ca4550785aa470e68aa11d6eb72ca30f4095b"
+        );
+        assert_eq!(
+            bundle.identity,
+            "sha256:5e456d824eafbde3b1a538493ba7c139013d9756a4b4c821772bf353f64533e5"
+        );
+        assert_eq!(
+            store.identity,
+            "sha256:1e791ee512dd267a64deaf7cbc395abc75254e251c7538514d26662db5af0ea9"
+        );
     }
 
     #[test]

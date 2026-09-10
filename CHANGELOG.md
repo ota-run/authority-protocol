@@ -26,6 +26,13 @@
 
 ## Unreleased
 
+- Add closed protected secret-delivery verifier-store and binding-bundle records. The root-owned
+  verifier store admits exactly one public verification key and pins exactly one current bundle generation;
+  the bundle binds only a bounded opaque payload identity and a domain-separated Ed25519 signature
+  envelope. Protocol validates canonical structure and store-to-bundle reconciliation only. It does
+  not load protected files, verify signatures, parse provider bindings, establish authority, contact
+  a provider, materialize or deliver secrets, execute a child, or create evidence.
+
 - Add immutable `ota.authority-launcher.systemd/v4` for protected boot observation without
   reinterpreting V3. V4 retains `ProtectProc=invisible` and `ProcSubset=pid`, binds one named
   read-only systemd-manager-opened boot-ID file and one named launcher listener, and requires the
