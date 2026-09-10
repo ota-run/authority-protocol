@@ -203,6 +203,8 @@ pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTIT
     &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v1\0";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-secret-delivery-transaction-binding.v1\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_SESSION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-secret-delivery-transaction-session.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-signature.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
@@ -2610,7 +2612,10 @@ pub fn protected_launcher_secret_delivery_transaction_binding_request_v1_identit
             != launcher_invocation_request_identity(&request.invocation)?
         || !is_sha256_identity(&request.secret_transaction_candidate_identity)
         || !is_sha256_identity(&request.startup_continuation_identity)
-        || !is_sha256_identity(&request.session_identity)
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
     {
         return Err(ProtocolError::InvalidRecord);
     }
@@ -2619,6 +2624,20 @@ pub fn protected_launcher_secret_delivery_transaction_binding_request_v1_identit
     message_identity(
         PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V1,
         &canonical,
+    )
+}
+
+/// Derives the private session handle from the exact startup continuation that binds both ends of
+/// the inherited Unix stream. Callers cannot choose an unrelated opaque session identity.
+pub fn protected_launcher_secret_delivery_transaction_session_v1_identity(
+    startup_continuation_identity: &str,
+) -> Result<String, ProtocolError> {
+    if !is_sha256_identity(startup_continuation_identity) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_SESSION_IDENTITY_DOMAIN_V1,
+        &startup_continuation_identity,
     )
 }
 
@@ -5218,7 +5237,10 @@ mod tests {
             observation: capability_observation_request(),
             secret_transaction_candidate_identity: format!("sha256:{}", "3".repeat(64)),
             startup_continuation_identity: format!("sha256:{}", "4".repeat(64)),
-            session_identity: format!("sha256:{}", "5".repeat(64)),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                format!("sha256:{}", "4".repeat(64)).as_str(),
+            )
+            .expect("session identity"),
         };
         request.identity =
             protected_launcher_secret_delivery_transaction_binding_request_v1_identity(&request)
@@ -5973,6 +5995,66 @@ mod tests {
             &request, &response, &evidence,
         )
         .expect("same-session response reconciles");
+
+        let derived_session = protected_launcher_secret_delivery_transaction_session_v1_identity(
+            request.startup_continuation_identity.as_str(),
+        )
+        .expect("session identity");
+        assert_eq!(derived_session, request.session_identity);
+        assert_eq!(
+            derived_session,
+            protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )
+            .expect("deterministic session identity")
+        );
+        assert_ne!(
+            derived_session,
+            protected_launcher_secret_delivery_transaction_session_v1_identity(
+                format!("sha256:{}", "6".repeat(64)).as_str(),
+            )
+            .expect("distinct startup identity")
+        );
+        assert_eq!(
+            protected_launcher_secret_delivery_transaction_session_v1_identity("not-an-identity"),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        for mut forged in [
+            {
+                let mut request = request.clone();
+                request.session_identity = format!("sha256:{}", "9".repeat(64));
+                request
+            },
+            {
+                let mut request = request.clone();
+                request.startup_continuation_identity = format!("sha256:{}", "8".repeat(64));
+                request
+            },
+        ] {
+            // Recompute the outer request hash exactly as an untrusted caller could. Validation
+            // must still reject the session/startup relationship before Launcher derivation.
+            forged.identity.clear();
+            forged.identity = message_identity(
+                PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V1,
+                &forged,
+            )
+            .expect("forged outer request identity");
+            assert_eq!(
+                protected_launcher_secret_delivery_transaction_binding_request_v1_identity(&forged,),
+                Err(ProtocolError::InvalidRecord)
+            );
+            assert_eq!(
+                validate_protected_launcher_secret_delivery_transaction_binding_request_v1(&forged),
+                Err(ProtocolError::InvalidRecord)
+            );
+            assert_eq!(
+                reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+                    &forged, &response, &evidence,
+                ),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
 
         let mut unknown = serde_json::to_value(&response.binding).expect("binding JSON");
         unknown
