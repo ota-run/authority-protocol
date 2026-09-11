@@ -26,6 +26,14 @@
 
 ## Unreleased
 
+- Add closed private protected-authority snapshot challenge, request, payload, and response
+  records with a separate 256-bit nonce commitment, five-minute freshness bound, exact
+  descriptor/byte/store/bundle reconciliation, and a single-frame transport bound. Add immutable
+  snapshot-bound V2 secret-delivery transaction-binding records; V1 cannot select a snapshot. The
+  protocol remains structural: it does not open protected files, reserve replay state, verify live
+  descriptor provenance or bundle signatures, parse provider bindings, contact a provider,
+  materialize or deliver secrets, execute a child, or create evidence.
+
 - Add the closed same-execution secret-delivery transaction-binding exchange. The selected Core
   child carries only the exact Launcher request identity retained in its startup continuation.
   Canonical preflight reconciliation binds the request to that retained continuation before

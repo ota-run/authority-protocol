@@ -61,6 +61,13 @@ This repository owns:
   derivation, signing, or replay mutation. Launcher then privately reconciles capability evidence
   before returning the private binding and signed public projection; Core separately reconciles that response against its retained
   request and independently loaded verifier and installation identities before signature policy;
+- a closed private protected-authority snapshot challenge, request, payload, and response, plus an
+  additive snapshot-bound V2 transaction-binding exchange. The snapshot binds exact selected-child
+  request/startup/session, protected store descriptor metadata and bytes, and the current signed
+  verifier/bundle state; Core treats transferred bytes as untrusted semantic input and must
+  independently reconstruct its selected Step 1-6 truth. V1 remains immutable. Protocol neither
+  opens stores nor verifies their live provenance, reserves replay state, parses provider bindings,
+  contacts a provider, or activates delivery or execution;
 - closed protected secret-delivery verifier-store and binding-bundle records. The store admits
   exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an
   opaque, bounded payload identity and domain-separated Ed25519 signature envelope without making
