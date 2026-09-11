@@ -57,8 +57,9 @@ This repository owns:
   signed public projection, with cross-record reconciliation against the retained request;
 - a closed same-execution secret-delivery transaction-binding exchange. Core sends the exact
   Launcher request identity retained in its startup continuation, not caller-reconstructed request
-  content. Launcher privately reconciles capability evidence before returning the private binding
-  and signed public projection; Core separately reconciles that response against its retained
+  content. Protocol reconciles that request to the retained continuation before protected
+  derivation, signing, or replay mutation. Launcher then privately reconciles capability evidence
+  before returning the private binding and signed public projection; Core separately reconciles that response against its retained
   request and independently loaded verifier and installation identities before signature policy;
 - closed protected secret-delivery verifier-store and binding-bundle records. The store admits
   exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an

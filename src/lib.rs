@@ -2733,6 +2733,23 @@ pub fn validate_protected_launcher_secret_delivery_transaction_binding_request_v
     Ok(())
 }
 
+/// Reconciles a binding request to the exact retained startup continuation before any protected
+/// capability derivation, signing, or replay-state mutation occurs.
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+) -> Result<(), ProtocolError> {
+    validate_protected_launcher_secret_delivery_transaction_binding_request_v1(request)?;
+    if startup_continuation.identity
+        != launcher_startup_continuation_identity(startup_continuation)?
+        || request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
 pub fn protected_launcher_secret_delivery_transaction_binding_v1_identity(
     binding: &ProtectedLauncherSecretDeliveryTransactionBindingV1,
 ) -> Result<String, ProtocolError> {
@@ -2784,15 +2801,14 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response
     verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
     installation_evidence_identity: &str,
 ) -> Result<(), ProtocolError> {
-    validate_protected_launcher_secret_delivery_transaction_binding_request_v1(request)?;
+    reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+        request,
+        startup_continuation,
+    )?;
     validate_protected_launcher_capability_projection_verifier_v1(verifier)?;
     if response.schema_version != 1
         || response.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE
         || response.request_identity != request.identity
-        || startup_continuation.identity
-            != launcher_startup_continuation_identity(startup_continuation)?
-        || request.startup_continuation_identity != startup_continuation.identity
-        || request.launcher_request_identity != startup_continuation.launcher_request_identity
         || validate_protected_launcher_capability_observation_projection_v1(&response.projection)
             .is_err()
     {
@@ -6604,6 +6620,11 @@ mod tests {
         let response = secret_delivery_transaction_binding_response(&request, &evidence);
         validate_protected_launcher_secret_delivery_transaction_binding_request_v1(&request)
             .expect("request validates");
+        reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+            &request,
+            &continuation,
+        )
+        .expect("request reconciles before protected work");
         validate_protected_launcher_secret_delivery_transaction_binding_v1(&response.binding)
             .expect("binding validates");
         reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
@@ -6643,6 +6664,19 @@ mod tests {
         );
         assert_eq!(
             protected_launcher_secret_delivery_transaction_session_v1_identity("not-an-identity"),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut substituted_continuation = continuation.clone();
+        substituted_continuation.launcher_request_identity = format!("sha256:{}", "7".repeat(64));
+        substituted_continuation.identity =
+            launcher_startup_continuation_identity(&substituted_continuation)
+                .expect("substituted continuation identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+                &request,
+                &substituted_continuation,
+            ),
             Err(ProtocolError::InvalidRecord)
         );
 

@@ -28,8 +28,10 @@
 
 - Add the closed same-execution secret-delivery transaction-binding exchange. The selected Core
   child carries only the exact Launcher request identity retained in its startup continuation.
-  Launcher-owned reconciliation binds private capability evidence before returning the binding and
-  signed public projection; Core-visible reconciliation separately binds the response to its
+  Canonical preflight reconciliation binds the request to that retained continuation before
+  protected derivation, signing, or replay mutation. Launcher-owned reconciliation then binds
+  private capability evidence before returning the binding and signed public projection;
+  Core-visible reconciliation separately binds the response to its
   retained request and independently loaded verifier and installation identities. Protocol does
   not perform signature policy, open provider authority, contact a provider, deliver a secret, or
   activate execution.
