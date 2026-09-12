@@ -3396,6 +3396,42 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response
     Ok(())
 }
 
+/// Reconciles Launcher-private capability evidence before a snapshot-bound V2 response crosses
+/// to Core. The public response verifier cannot establish which protected capability produced the
+/// binding, so the Launcher must retain and compare that private identity here.
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV2,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV2,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+        request,
+        response,
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        &evidence.verifier,
+        &evidence.installation_evidence_identity,
+        observed_at_unix_seconds,
+    )?;
+    let binding = &response.binding;
+    if protected_launcher_capability_v1_identity(&evidence.protected_capability)?
+        != evidence.protected_capability.identity
+        || binding.protected_capability_identity != evidence.protected_capability.identity
+        || response.projection != evidence.projection
+        || evidence.protected_capability.launcher_request_identity
+            != request.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
 pub fn protected_launcher_capability_observation_signing_request_v1_identity(
     request: &ProtectedLauncherCapabilityObservationSigningRequestV1,
 ) -> Result<String, ProtocolError> {
@@ -10985,9 +11021,28 @@ mod tests {
         let evidence = secret_delivery_transaction_binding_evidence();
         let request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
         let response = secret_delivery_transaction_binding_response_v2(&request, &evidence);
-        reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+        reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
             &request,
             &response,
+            &snapshot_request,
+            &snapshot_response,
+            &continuation,
+            &evidence,
+            snapshot_request.challenge.issued_at_unix_seconds,
+        )
+        .expect("snapshot-bound v2 binding reconciles");
+
+        let mut substituted_capability = response.clone();
+        substituted_capability.binding.protected_capability_identity =
+            format!("sha256:{}", "e".repeat(64));
+        substituted_capability.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v2_identity(
+                &substituted_capability.binding,
+            )
+            .expect("self-consistent substituted capability binding identity");
+        reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+            &request,
+            &substituted_capability,
             &snapshot_request,
             &snapshot_response,
             &continuation,
@@ -10995,7 +11050,20 @@ mod tests {
             &evidence.installation_evidence_identity,
             snapshot_request.challenge.issued_at_unix_seconds,
         )
-        .expect("snapshot-bound v2 binding reconciles");
+        .expect("the public response shape alone cannot establish protected capability provenance");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+                &request,
+                &substituted_capability,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &evidence,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent substituted protected capability cannot cross the Launcher boundary"
+        );
 
         let mut substituted = snapshot_response.clone();
         substituted.payload.contract_identity = format!("sha256:{}", "d".repeat(64));
