@@ -98,6 +98,7 @@ pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST: &str =
     "protected_launcher_capability_observation_probe_request";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE: &str =
     "protected_launcher_capability_observation_response";
+pub const PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE: &str = "protected_same_child_capability_prelude";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST: &str =
     "protected_launcher_capability_observation_signing_request";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE: &str =
@@ -239,6 +240,8 @@ pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTIT
     &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v2\0";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V2: &[u8] =
     b"ota.protected-launcher-secret-delivery-transaction-binding.v2\0";
+pub const PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-same-child-capability-prelude.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
     b"ota.protected-launcher-capability-observation-signature.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
@@ -689,6 +692,25 @@ pub struct ProtectedLauncherCapabilityObservationResponseV1 {
     pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
 }
 
+/// Closed private carrier retained over the selected child's inherited session after one
+/// capability observation. It never enters public output, artifacts, receipts, or archives.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSameChildCapabilityPreludeV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub observation_request_identity: String,
+    pub projection_identity: String,
+    pub protected_capability_identity: String,
+    pub verifier_identity: String,
+    pub installation_evidence_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub expires_at_unix_seconds: u64,
+}
+
 /// Protected Launcher-to-Attestor request for one exact capability-observation signature.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -838,6 +860,7 @@ pub struct ProtectedLauncherSecretDeliveryTransactionBindingRequestV2 {
     pub secret_transaction_candidate_identity: String,
     pub startup_continuation_identity: String,
     pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
     pub protected_snapshot_identity: String,
 }
 
@@ -852,6 +875,7 @@ pub struct ProtectedLauncherSecretDeliveryTransactionBindingV2 {
     pub launcher_request_identity: String,
     pub startup_continuation_identity: String,
     pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
     pub protected_snapshot_identity: String,
     pub protected_capability_identity: String,
     pub secret_transaction_candidate_identity: String,
@@ -869,6 +893,7 @@ pub struct ProtectedLauncherSecretDeliveryTransactionBindingResponseV2 {
     pub schema_version: u32,
     pub message_kind: String,
     pub request_identity: String,
+    pub same_child_capability_prelude_identity: String,
     pub protected_snapshot_identity: String,
     pub binding: ProtectedLauncherSecretDeliveryTransactionBindingV2,
     pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
@@ -2815,6 +2840,48 @@ pub fn validate_protected_launcher_capability_observation_response_v1(
     validate_protected_launcher_capability_observation_projection_v1(&response.projection)
 }
 
+pub fn protected_same_child_capability_prelude_v1_identity(
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+) -> Result<String, ProtocolError> {
+    if prelude.schema_version != 1
+        || prelude.record_kind != PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE
+        || prelude.expires_at_unix_seconds == 0
+        || [
+            &prelude.observation_request_identity,
+            &prelude.projection_identity,
+            &prelude.protected_capability_identity,
+            &prelude.verifier_identity,
+            &prelude.installation_evidence_identity,
+            &prelude.launcher_request_identity,
+            &prelude.startup_continuation_identity,
+            &prelude.session_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || prelude.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                prelude.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = prelude.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_same_child_capability_prelude_v1(
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+) -> Result<(), ProtocolError> {
+    if prelude.identity != protected_same_child_capability_prelude_v1_identity(prelude)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
 pub fn protected_launcher_secret_delivery_transaction_binding_request_v1_identity(
     request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
 ) -> Result<String, ProtocolError> {
@@ -3263,6 +3330,7 @@ pub fn protected_launcher_secret_delivery_transaction_binding_request_v2_identit
             != request.launcher_request_identity
         || !is_sha256_identity(&request.secret_transaction_candidate_identity)
         || !is_sha256_identity(&request.startup_continuation_identity)
+        || !is_sha256_identity(&request.same_child_capability_prelude_identity)
         || !is_sha256_identity(&request.protected_snapshot_identity)
         || request.session_identity
             != protected_launcher_secret_delivery_transaction_session_v1_identity(
@@ -3301,6 +3369,7 @@ pub fn protected_launcher_secret_delivery_transaction_binding_v2_identity(
             &binding.launcher_request_identity,
             &binding.startup_continuation_identity,
             &binding.session_identity,
+            &binding.same_child_capability_prelude_identity,
             &binding.protected_snapshot_identity,
             &binding.protected_capability_identity,
             &binding.secret_transaction_candidate_identity,
@@ -3342,6 +3411,7 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response
     snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
     snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
     startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
     verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
     installation_evidence_identity: &str,
     observed_at_unix_seconds: u64,
@@ -3353,6 +3423,7 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response
         observed_at_unix_seconds,
     )?;
     validate_protected_launcher_secret_delivery_transaction_binding_request_v2(request)?;
+    validate_protected_same_child_capability_prelude_v1(prelude)?;
     validate_protected_launcher_capability_observation_challenge_v1(
         &request.observation.challenge,
         observed_at_unix_seconds,
@@ -3360,11 +3431,14 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response
     validate_protected_launcher_capability_projection_verifier_v1(verifier)?;
     if request.startup_continuation_identity != startup_continuation.identity
         || request.launcher_request_identity != startup_continuation.launcher_request_identity
+        || request.same_child_capability_prelude_identity != prelude.identity
         || request.protected_snapshot_identity != snapshot_response.protected_snapshot_identity
         || response.schema_version != 2
         || response.message_kind
             != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V2
         || response.request_identity != request.identity
+        || response.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
         || response.protected_snapshot_identity != request.protected_snapshot_identity
         || validate_protected_launcher_capability_observation_projection_v1(&response.projection)
             .is_err()
@@ -3377,18 +3451,28 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response
         || binding.launcher_request_identity != request.launcher_request_identity
         || binding.startup_continuation_identity != request.startup_continuation_identity
         || binding.session_identity != request.session_identity
+        || binding.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
         || binding.protected_snapshot_identity != request.protected_snapshot_identity
         || binding.protected_snapshot_identity != response.protected_snapshot_identity
         || binding.secret_transaction_candidate_identity
             != request.secret_transaction_candidate_identity
         || binding.observation_request_identity != request.observation.identity
+        || prelude.observation_request_identity != request.observation.identity
+        || prelude.launcher_request_identity != request.launcher_request_identity
+        || prelude.startup_continuation_identity != request.startup_continuation_identity
+        || prelude.session_identity != request.session_identity
         || binding.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || prelude.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
         || binding.projection_identity != response.projection.projection_identity
+        || prelude.projection_identity != response.projection.projection_identity
         || binding.verifier_identity != verifier.identity
+        || prelude.verifier_identity != verifier.identity
         || response.projection.payload.signing_key_identity != verifier.key_identity
         || response.projection.payload.challenge_identity != request.observation.challenge.identity
         || response.projection.payload.runner_version != request.observation.runner_version
         || binding.installation_evidence_identity != installation_evidence_identity
+        || prelude.installation_evidence_identity != installation_evidence_identity
         || !is_sha256_identity(installation_evidence_identity)
     {
         return Err(ProtocolError::InvalidRecord);
@@ -3406,6 +3490,7 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
     snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
     snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
     startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
     evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
     observed_at_unix_seconds: u64,
 ) -> Result<(), ProtocolError> {
@@ -3415,6 +3500,7 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
         snapshot_request,
         snapshot_response,
         startup_continuation,
+        prelude,
         &evidence.verifier,
         &evidence.installation_evidence_identity,
         observed_at_unix_seconds,
@@ -3423,6 +3509,7 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
     if protected_launcher_capability_v1_identity(&evidence.protected_capability)?
         != evidence.protected_capability.identity
         || binding.protected_capability_identity != evidence.protected_capability.identity
+        || prelude.protected_capability_identity != evidence.protected_capability.identity
         || response.projection != evidence.projection
         || evidence.protected_capability.launcher_request_identity
             != request.launcher_request_identity
@@ -6386,6 +6473,8 @@ mod tests {
         snapshot: &ProtectedAuthoritySnapshotResponseV1,
     ) -> ProtectedLauncherSecretDeliveryTransactionBindingRequestV2 {
         let continuation = secret_delivery_startup_continuation();
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
         let mut request = ProtectedLauncherSecretDeliveryTransactionBindingRequestV2 {
             schema_version: 2,
             message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V2.into(),
@@ -6398,12 +6487,40 @@ mod tests {
                 continuation.identity.as_str(),
             )
             .expect("v2 session identity"),
+            same_child_capability_prelude_identity: prelude.identity,
             protected_snapshot_identity: snapshot.protected_snapshot_identity.clone(),
         };
         request.identity =
             protected_launcher_secret_delivery_transaction_binding_request_v2_identity(&request)
                 .expect("v2 request identity");
         request
+    }
+
+    fn same_child_capability_prelude(
+        continuation: &LauncherStartupContinuationV1,
+        evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    ) -> ProtectedSameChildCapabilityPreludeV1 {
+        let observation = capability_observation_request();
+        let mut prelude = ProtectedSameChildCapabilityPreludeV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE.into(),
+            identity: String::new(),
+            observation_request_identity: observation.identity,
+            projection_identity: evidence.projection.projection_identity.clone(),
+            protected_capability_identity: evidence.protected_capability.identity.clone(),
+            verifier_identity: evidence.verifier.identity.clone(),
+            installation_evidence_identity: evidence.installation_evidence_identity.clone(),
+            launcher_request_identity: continuation.launcher_request_identity.clone(),
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("prelude session identity"),
+            expires_at_unix_seconds: observation.challenge.expires_at_unix_seconds,
+        };
+        prelude.identity = protected_same_child_capability_prelude_v1_identity(&prelude)
+            .expect("same-child prelude identity");
+        prelude
     }
 
     fn secret_delivery_transaction_binding_response_v2(
@@ -6418,6 +6535,9 @@ mod tests {
             launcher_request_identity: request.launcher_request_identity.clone(),
             startup_continuation_identity: request.startup_continuation_identity.clone(),
             session_identity: request.session_identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
             protected_snapshot_identity: request.protected_snapshot_identity.clone(),
             protected_capability_identity: evidence.protected_capability.identity.clone(),
             secret_transaction_candidate_identity: request
@@ -6436,6 +6556,9 @@ mod tests {
             schema_version: 2,
             message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V2.into(),
             request_identity: request.identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
             protected_snapshot_identity: request.protected_snapshot_identity.clone(),
             binding,
             projection: evidence.projection.clone(),
@@ -9763,6 +9886,8 @@ mod tests {
         let binding_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
         let binding_response =
             secret_delivery_transaction_binding_response_v2(&binding_request, &evidence);
+        let prelude =
+            same_child_capability_prelude(&secret_delivery_startup_continuation(), &evidence);
         assert_eq!(
             snapshot_request.challenge.identity,
             "sha256:d446bf13e476b7d9b29ef98426b08a370f2c22c6cfc49e24039840635fd2f56f"
@@ -9780,12 +9905,16 @@ mod tests {
             "sha256:f8590c6da80208f4b3cd402b9474fe25a08ee2aa99acb4706d7ffb6d11bc4a13"
         );
         assert_eq!(
+            prelude.identity,
+            "sha256:50f07cfa07ecc3814edf03a885f6ec9461eb20a29a7f700d1ef493082ec977bb"
+        );
+        assert_eq!(
             binding_request.identity,
-            "sha256:dc8d0dc4beca584dcde704ec708f04b940aa3c3d32776dfd52d8b9f609d5c8fc"
+            "sha256:a1d6f7d7281422365c5b1e257c4ba4f2ea8a4ddb9e2b202dcdaaf4fee79af398"
         );
         assert_eq!(
             binding_response.binding.identity,
-            "sha256:a905b12aa7e287f6bec20a14678dfe2429dcadbea5bb93b5d1997931cea84090"
+            "sha256:649d32d023eb063851c5af047da4ec1364141403124f2200876f779861b1ea84"
         );
     }
 
@@ -10814,6 +10943,8 @@ mod tests {
         let binding_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
         let binding_response =
             secret_delivery_transaction_binding_response_v2(&binding_request, &evidence);
+        let prelude =
+            same_child_capability_prelude(&secret_delivery_startup_continuation(), &evidence);
         let assert_keys = |value: serde_json::Value, expected: &[&str]| {
             let actual = value
                 .as_object()
@@ -10887,11 +11018,38 @@ mod tests {
                 "message_kind",
                 "observation",
                 "protected_snapshot_identity",
+                "same_child_capability_prelude_identity",
                 "schema_version",
                 "secret_transaction_candidate_identity",
                 "session_identity",
                 "startup_continuation_identity",
             ],
+        );
+        assert_keys(
+            serde_json::to_value(&prelude).expect("same-child prelude wire"),
+            &[
+                "expires_at_unix_seconds",
+                "identity",
+                "installation_evidence_identity",
+                "launcher_request_identity",
+                "observation_request_identity",
+                "projection_identity",
+                "protected_capability_identity",
+                "record_kind",
+                "schema_version",
+                "session_identity",
+                "startup_continuation_identity",
+                "verifier_identity",
+            ],
+        );
+        let mut unknown_prelude = serde_json::to_value(&prelude).expect("same-child prelude JSON");
+        unknown_prelude
+            .as_object_mut()
+            .expect("same-child prelude object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSameChildCapabilityPreludeV1>(unknown_prelude)
+                .is_err()
         );
         assert_keys(
             serde_json::to_value(&binding_response.binding).expect("binding wire"),
@@ -10906,6 +11064,7 @@ mod tests {
                 "protected_capability_identity",
                 "protected_snapshot_identity",
                 "request_identity",
+                "same_child_capability_prelude_identity",
                 "schema_version",
                 "secret_transaction_candidate_identity",
                 "session_identity",
@@ -10921,6 +11080,7 @@ mod tests {
                 "projection",
                 "protected_snapshot_identity",
                 "request_identity",
+                "same_child_capability_prelude_identity",
                 "schema_version",
             ],
         );
@@ -11020,17 +11180,156 @@ mod tests {
 
         let evidence = secret_delivery_transaction_binding_evidence();
         let request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
         let response = secret_delivery_transaction_binding_response_v2(&request, &evidence);
+        validate_protected_same_child_capability_prelude_v1(&prelude)
+            .expect("same-child prelude is structurally valid");
         reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
             &request,
             &response,
             &snapshot_request,
             &snapshot_response,
             &continuation,
+            &prelude,
             &evidence,
             snapshot_request.challenge.issued_at_unix_seconds,
         )
         .expect("snapshot-bound v2 binding reconciles");
+
+        let assert_self_consistent_prelude_refuses =
+            |mut substituted_prelude: ProtectedSameChildCapabilityPreludeV1| {
+                substituted_prelude.identity =
+                    protected_same_child_capability_prelude_v1_identity(&substituted_prelude)
+                        .expect("self-consistent substituted prelude identity");
+                let mut substituted_request = request.clone();
+                substituted_request.same_child_capability_prelude_identity =
+                    substituted_prelude.identity.clone();
+                substituted_request.identity =
+                    protected_launcher_secret_delivery_transaction_binding_request_v2_identity(
+                        &substituted_request,
+                    )
+                    .expect("self-consistent substituted prelude request identity");
+                let mut substituted_response = response.clone();
+                substituted_response.request_identity = substituted_request.identity.clone();
+                substituted_response.same_child_capability_prelude_identity =
+                    substituted_prelude.identity.clone();
+                substituted_response.binding.request_identity =
+                    substituted_request.identity.clone();
+                substituted_response
+                    .binding
+                    .same_child_capability_prelude_identity = substituted_prelude.identity.clone();
+                substituted_response.binding.identity =
+                    protected_launcher_secret_delivery_transaction_binding_v2_identity(
+                        &substituted_response.binding,
+                    )
+                    .expect("self-consistent substituted prelude binding identity");
+                assert_eq!(
+                    reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+                        &substituted_request,
+                        &substituted_response,
+                        &snapshot_request,
+                        &snapshot_response,
+                        &continuation,
+                        &substituted_prelude,
+                        &evidence,
+                        snapshot_request.challenge.issued_at_unix_seconds,
+                    ),
+                    Err(ProtocolError::InvalidRecord),
+                    "a self-consistent prelude substitution cannot cross the retained V2 boundary"
+                );
+            };
+
+        for field in [
+            "observation",
+            "projection",
+            "protected_capability",
+            "verifier",
+            "installation_evidence",
+            "launcher_request",
+            "startup_continuation",
+            "expiry",
+        ] {
+            let mut substituted = prelude.clone();
+            match field {
+                "observation" => {
+                    substituted.observation_request_identity = format!("sha256:{}", "a".repeat(64));
+                }
+                "projection" => {
+                    substituted.projection_identity = format!("sha256:{}", "b".repeat(64));
+                }
+                "protected_capability" => {
+                    substituted.protected_capability_identity =
+                        format!("sha256:{}", "c".repeat(64));
+                }
+                "verifier" => {
+                    substituted.verifier_identity = format!("sha256:{}", "d".repeat(64));
+                }
+                "installation_evidence" => {
+                    substituted.installation_evidence_identity =
+                        format!("sha256:{}", "e".repeat(64));
+                }
+                "launcher_request" => {
+                    substituted.launcher_request_identity = format!("sha256:{}", "f".repeat(64));
+                }
+                "startup_continuation" => {
+                    substituted.startup_continuation_identity =
+                        format!("sha256:{}", "0".repeat(64));
+                    substituted.session_identity =
+                        protected_launcher_secret_delivery_transaction_session_v1_identity(
+                            substituted.startup_continuation_identity.as_str(),
+                        )
+                        .expect("self-consistent substituted prelude session identity");
+                }
+                "expiry" => {
+                    substituted.expires_at_unix_seconds += 1;
+                }
+                _ => unreachable!("table contains only declared prelude fields"),
+            }
+            assert_self_consistent_prelude_refuses(substituted);
+        }
+
+        let mut substituted_prelude = prelude.clone();
+        substituted_prelude.protected_capability_identity = format!("sha256:{}", "f".repeat(64));
+        substituted_prelude.identity =
+            protected_same_child_capability_prelude_v1_identity(&substituted_prelude)
+                .expect("self-consistent substituted prelude identity");
+        let mut substituted_prelude_request = request.clone();
+        substituted_prelude_request.same_child_capability_prelude_identity =
+            substituted_prelude.identity.clone();
+        substituted_prelude_request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v2_identity(
+                &substituted_prelude_request,
+            )
+            .expect("self-consistent substituted prelude request identity");
+        let mut substituted_prelude_response = response.clone();
+        substituted_prelude_response.request_identity =
+            substituted_prelude_request.identity.clone();
+        substituted_prelude_response.same_child_capability_prelude_identity =
+            substituted_prelude.identity.clone();
+        substituted_prelude_response.binding.request_identity =
+            substituted_prelude_request.identity.clone();
+        substituted_prelude_response
+            .binding
+            .same_child_capability_prelude_identity = substituted_prelude.identity.clone();
+        substituted_prelude_response.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v2_identity(
+                &substituted_prelude_response.binding,
+            )
+            .expect("self-consistent substituted prelude binding identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+                &substituted_prelude_request,
+                &substituted_prelude_response,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &substituted_prelude,
+                &evidence,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent prelude cannot substitute its retained protected capability"
+        );
 
         let mut substituted_capability = response.clone();
         substituted_capability.binding.protected_capability_identity =
@@ -11046,6 +11345,7 @@ mod tests {
             &snapshot_request,
             &snapshot_response,
             &continuation,
+            &prelude,
             &evidence.verifier,
             &evidence.installation_evidence_identity,
             snapshot_request.challenge.issued_at_unix_seconds,
@@ -11058,6 +11358,7 @@ mod tests {
                 &snapshot_request,
                 &snapshot_response,
                 &continuation,
+                &prelude,
                 &evidence,
                 snapshot_request.challenge.issued_at_unix_seconds,
             ),
@@ -11075,6 +11376,7 @@ mod tests {
                 &snapshot_request,
                 &substituted,
                 &continuation,
+                &prelude,
                 &evidence.verifier,
                 &evidence.installation_evidence_identity,
                 snapshot_request.challenge.issued_at_unix_seconds,
@@ -11147,6 +11449,7 @@ mod tests {
                 &snapshot_request,
                 &snapshot_response,
                 &continuation,
+                &prelude,
                 &evidence.verifier,
                 &evidence.installation_evidence_identity,
                 snapshot_request.challenge.issued_at_unix_seconds + 2,
