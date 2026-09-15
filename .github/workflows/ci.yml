@@ -42,9 +42,27 @@ jobs:
         with:
           toolchain: 1.95.0
           components: clippy,rustfmt
-      - name: Verify protocol
+
+      - name: Install contract-selected Ota
+        id: ota
+        uses: ota-run/setup@493cba84bf7f7c11c9e8e996d832d93a89c62184
+        with:
+          source: contract
+          contract-path: ota.yaml
+
+      - name: Verify exact Ota source identity
+        env:
+          EXPECTED_OTA_REVISION: ${{ steps.ota.outputs.source-git-rev }}
         run: |
-          cargo fmt --check
-          cargo check --locked --all-targets
-          cargo clippy --locked --all-targets -- -D warnings
-          cargo test --locked --all-targets
+          set -euo pipefail
+          test -n "$EXPECTED_OTA_REVISION"
+          version_json=$(ota --version --json)
+          observed_commit=$(jq -er '.commit' <<<"$version_json")
+          jq -e '.source_build == true and .dirty == false' <<<"$version_json"
+          test "${EXPECTED_OTA_REVISION#"$observed_commit"}" != "$EXPECTED_OTA_REVISION"
+
+      - name: Validate contract
+        run: ota validate
+
+      - name: Run contract-owned verification
+        run: ota run verify --agent
