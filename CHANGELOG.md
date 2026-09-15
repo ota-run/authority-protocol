@@ -26,6 +26,13 @@
 
 ## Unreleased
 
+- Add immutable V3 protected Launcher secret-delivery transaction-binding records. V3 preserves
+  V2 unchanged while binding one exact transport-dependency-record identity into the request and
+  private binding, with closed wire shapes, domain-separated identities, exact reconciliation, and
+  substitution refusal. Protocol does not carry or interpret the dependency graph, establish
+  installation authority, select transport configuration, open a network path, contact a provider,
+  materialize or deliver secrets, execute a child, or create evidence.
+
 - Add closed private protected-authority snapshot challenge, request, payload, and response
   records with a separate 256-bit nonce commitment, five-minute freshness bound, exact
   descriptor/byte/store/bundle reconciliation, and a single-frame transport bound. Add immutable

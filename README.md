@@ -68,6 +68,11 @@ This repository owns:
   independently reconstruct its selected Step 1-6 truth. V1 remains immutable. Protocol neither
   opens stores nor verifies their live provenance, reserves replay state, parses provider bindings,
   contacts a provider, or activates delivery or execution;
+- an additive snapshot-bound V3 transaction-binding exchange that preserves V2 unchanged and binds
+  one exact transport-dependency-record identity into both the request and private binding. Protocol
+  validates only that closed identity relationship. Core retains ownership of the complete expected
+  dependency graph and record, Cargo resolution, semantic comparison, and candidate derivation;
+  the V3 exchange grants no installation authority and opens no transport or provider path;
 - closed protected secret-delivery verifier-store and binding-bundle records. The store admits
   exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an
   opaque, bounded payload identity and domain-separated Ed25519 signature envelope without making

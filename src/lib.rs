@@ -119,6 +119,12 @@ pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V2: &str =
     "protected_launcher_secret_delivery_transaction_binding_v2";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V2: &str =
     "protected_launcher_secret_delivery_transaction_binding_response_v2";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V3: &str =
+    "protected_launcher_secret_delivery_transaction_binding_request_v3";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V3: &str =
+    "protected_launcher_secret_delivery_transaction_binding_v3";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V3: &str =
+    "protected_launcher_secret_delivery_transaction_binding_response_v3";
 pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER: &str =
     "protected_launcher_capability_projection_verifier";
 pub const PROTECTED_SECRET_DELIVERY_VERIFIER_STORE: &str =
@@ -240,6 +246,10 @@ pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTIT
     &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v2\0";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V2: &[u8] =
     b"ota.protected-launcher-secret-delivery-transaction-binding.v2\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V3:
+    &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v3\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V3: &[u8] =
+    b"ota.protected-launcher-secret-delivery-transaction-binding.v3\0";
 pub const PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-same-child-capability-prelude.v1\0";
 pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
@@ -896,6 +906,59 @@ pub struct ProtectedLauncherSecretDeliveryTransactionBindingResponseV2 {
     pub same_child_capability_prelude_identity: String,
     pub protected_snapshot_identity: String,
     pub binding: ProtectedLauncherSecretDeliveryTransactionBindingV2,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// Additive transport-provenance binding request. V2 remains immutable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingRequestV3 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub launcher_request_identity: String,
+    pub observation: ProtectedLauncherCapabilityObservationRequestV1,
+    pub secret_transaction_candidate_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub transport_dependency_record_identity: String,
+}
+
+/// Additive private binding that carries exact transport build provenance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingV3 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub protected_capability_identity: String,
+    pub secret_transaction_candidate_identity: String,
+    pub observation_request_identity: String,
+    pub projection_identity: String,
+    pub verifier_identity: String,
+    pub installation_evidence_identity: String,
+    pub expires_at_unix_seconds: u64,
+    pub transport_dependency_record_identity: String,
+}
+
+/// Fixed local response for the additive transport-provenance transaction binding.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingResponseV3 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub binding: ProtectedLauncherSecretDeliveryTransactionBindingV3,
     pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
 }
 
@@ -3495,6 +3558,208 @@ pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
     observed_at_unix_seconds: u64,
 ) -> Result<(), ProtocolError> {
     reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+        request,
+        response,
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        prelude,
+        &evidence.verifier,
+        &evidence.installation_evidence_identity,
+        observed_at_unix_seconds,
+    )?;
+    let binding = &response.binding;
+    if protected_launcher_capability_v1_identity(&evidence.protected_capability)?
+        != evidence.protected_capability.identity
+        || binding.protected_capability_identity != evidence.protected_capability.identity
+        || prelude.protected_capability_identity != evidence.protected_capability.identity
+        || response.projection != evidence.projection
+        || evidence.protected_capability.launcher_request_identity
+            != request.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_request_v3_identity(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 3
+        || request.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V3
+        || request.observation.identity
+            != protected_launcher_capability_observation_request_v1_identity(&request.observation)?
+        || !is_sha256_identity(&request.launcher_request_identity)
+        || request.observation.expected_launcher_request_identity
+            != request.launcher_request_identity
+        || !is_sha256_identity(&request.secret_transaction_candidate_identity)
+        || !is_sha256_identity(&request.startup_continuation_identity)
+        || !is_sha256_identity(&request.same_child_capability_prelude_identity)
+        || !is_sha256_identity(&request.protected_snapshot_identity)
+        || !is_sha256_identity(&request.transport_dependency_record_identity)
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V3,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_request_v3(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+) -> Result<(), ProtocolError> {
+    if request.identity
+        != protected_launcher_secret_delivery_transaction_binding_request_v3_identity(request)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_v3_identity(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV3,
+) -> Result<String, ProtocolError> {
+    if binding.schema_version != 3
+        || binding.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V3
+        || binding.expires_at_unix_seconds == 0
+        || [
+            &binding.request_identity,
+            &binding.launcher_request_identity,
+            &binding.startup_continuation_identity,
+            &binding.session_identity,
+            &binding.same_child_capability_prelude_identity,
+            &binding.protected_snapshot_identity,
+            &binding.protected_capability_identity,
+            &binding.secret_transaction_candidate_identity,
+            &binding.observation_request_identity,
+            &binding.projection_identity,
+            &binding.verifier_identity,
+            &binding.installation_evidence_identity,
+            &binding.transport_dependency_record_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = binding.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V3,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_v3(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV3,
+) -> Result<(), ProtocolError> {
+    if binding.identity
+        != protected_launcher_secret_delivery_transaction_binding_v3_identity(binding)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles the additive V3 exchange, including exact build-provenance identity.
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV3,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+    installation_evidence_identity: &str,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_authority_snapshot_response_v1(
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_secret_delivery_transaction_binding_request_v3(request)?;
+    validate_protected_same_child_capability_prelude_v1(prelude)?;
+    validate_protected_launcher_capability_observation_challenge_v1(
+        &request.observation.challenge,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_capability_projection_verifier_v1(verifier)?;
+    if request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+        || request.same_child_capability_prelude_identity != prelude.identity
+        || request.protected_snapshot_identity != snapshot_response.protected_snapshot_identity
+        || response.schema_version != 3
+        || response.message_kind
+            != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V3
+        || response.request_identity != request.identity
+        || response.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || response.protected_snapshot_identity != request.protected_snapshot_identity
+        || validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+            .is_err()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_secret_delivery_transaction_binding_v3(&response.binding)?;
+    let binding = &response.binding;
+    if binding.request_identity != request.identity
+        || binding.launcher_request_identity != request.launcher_request_identity
+        || binding.startup_continuation_identity != request.startup_continuation_identity
+        || binding.session_identity != request.session_identity
+        || binding.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || binding.protected_snapshot_identity != request.protected_snapshot_identity
+        || binding.protected_snapshot_identity != response.protected_snapshot_identity
+        || binding.secret_transaction_candidate_identity
+            != request.secret_transaction_candidate_identity
+        || binding.transport_dependency_record_identity
+            != request.transport_dependency_record_identity
+        || binding.observation_request_identity != request.observation.identity
+        || prelude.observation_request_identity != request.observation.identity
+        || prelude.launcher_request_identity != request.launcher_request_identity
+        || prelude.startup_continuation_identity != request.startup_continuation_identity
+        || prelude.session_identity != request.session_identity
+        || binding.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || prelude.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || binding.projection_identity != response.projection.projection_identity
+        || prelude.projection_identity != response.projection.projection_identity
+        || binding.verifier_identity != verifier.identity
+        || prelude.verifier_identity != verifier.identity
+        || response.projection.payload.signing_key_identity != verifier.key_identity
+        || response.projection.payload.challenge_identity != request.observation.challenge.identity
+        || response.projection.payload.runner_version != request.observation.runner_version
+        || binding.installation_evidence_identity != installation_evidence_identity
+        || prelude.installation_evidence_identity != installation_evidence_identity
+        || !is_sha256_identity(installation_evidence_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles Launcher-private evidence before a V3 response crosses to Core.
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v3(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV3,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
         request,
         response,
         snapshot_request,
@@ -6555,6 +6820,79 @@ mod tests {
         ProtectedLauncherSecretDeliveryTransactionBindingResponseV2 {
             schema_version: 2,
             message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V2.into(),
+            request_identity: request.identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            binding,
+            projection: evidence.projection.clone(),
+        }
+    }
+
+    fn secret_delivery_transaction_binding_request_v3(
+        snapshot: &ProtectedAuthoritySnapshotResponseV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingRequestV3 {
+        let continuation = secret_delivery_startup_continuation();
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+        let mut request = ProtectedLauncherSecretDeliveryTransactionBindingRequestV3 {
+            schema_version: 3,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V3.into(),
+            identity: String::new(),
+            launcher_request_identity: continuation.launcher_request_identity,
+            observation: capability_observation_request(),
+            secret_transaction_candidate_identity: format!("sha256:{}", "c".repeat(64)),
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("v3 session identity"),
+            same_child_capability_prelude_identity: prelude.identity,
+            protected_snapshot_identity: snapshot.protected_snapshot_identity.clone(),
+            transport_dependency_record_identity: format!("sha256:{}", "d".repeat(64)),
+        };
+        request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v3_identity(&request)
+                .expect("v3 request identity");
+        request
+    }
+
+    fn secret_delivery_transaction_binding_response_v3(
+        request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+        evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingResponseV3 {
+        let mut binding = ProtectedLauncherSecretDeliveryTransactionBindingV3 {
+            schema_version: 3,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V3.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            protected_capability_identity: evidence.protected_capability.identity.clone(),
+            secret_transaction_candidate_identity: request
+                .secret_transaction_candidate_identity
+                .clone(),
+            observation_request_identity: request.observation.identity.clone(),
+            projection_identity: evidence.projection.projection_identity.clone(),
+            verifier_identity: evidence.verifier.identity.clone(),
+            installation_evidence_identity: evidence.installation_evidence_identity.clone(),
+            expires_at_unix_seconds: request.observation.challenge.expires_at_unix_seconds,
+            transport_dependency_record_identity: request
+                .transport_dependency_record_identity
+                .clone(),
+        };
+        binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v3_identity(&binding)
+                .expect("v3 binding identity");
+        ProtectedLauncherSecretDeliveryTransactionBindingResponseV3 {
+            schema_version: 3,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V3.into(),
             request_identity: request.identity.clone(),
             same_child_capability_prelude_identity: request
                 .same_child_capability_prelude_identity
@@ -9841,6 +10179,14 @@ mod tests {
             b"ota.protected-launcher-secret-delivery-transaction-binding.v2\0"
         );
         assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V3,
+            b"ota.protected-launcher-secret-delivery-transaction-binding-request.v3\0"
+        );
+        assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V3,
+            b"ota.protected-launcher-secret-delivery-transaction-binding.v3\0"
+        );
+        assert_eq!(
             [
                 CHALLENGE_REQUEST_DOMAIN_V1,
                 ATTESTATION_RESPONSE_DOMAIN_V1,
@@ -10943,6 +11289,9 @@ mod tests {
         let binding_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
         let binding_response =
             secret_delivery_transaction_binding_response_v2(&binding_request, &evidence);
+        let binding_request_v3 = secret_delivery_transaction_binding_request_v3(&snapshot_response);
+        let binding_response_v3 =
+            secret_delivery_transaction_binding_response_v3(&binding_request_v3, &evidence);
         let prelude =
             same_child_capability_prelude(&secret_delivery_startup_continuation(), &evidence);
         let assert_keys = |value: serde_json::Value, expected: &[&str]| {
@@ -11084,6 +11433,91 @@ mod tests {
                 "schema_version",
             ],
         );
+        assert_keys(
+            serde_json::to_value(&binding_request_v3).expect("v3 binding request wire"),
+            &[
+                "identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation",
+                "protected_snapshot_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "transport_dependency_record_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response_v3.binding).expect("v3 binding wire"),
+            &[
+                "expires_at_unix_seconds",
+                "identity",
+                "installation_evidence_identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation_request_identity",
+                "projection_identity",
+                "protected_capability_identity",
+                "protected_snapshot_identity",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "transport_dependency_record_identity",
+                "verifier_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response_v3).expect("v3 binding response wire"),
+            &[
+                "binding",
+                "message_kind",
+                "projection",
+                "protected_snapshot_identity",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+            ],
+        );
+        for (name, mut value) in [
+            (
+                "request",
+                serde_json::to_value(&binding_request_v3).expect("v3 request JSON"),
+            ),
+            (
+                "binding",
+                serde_json::to_value(&binding_response_v3.binding).expect("v3 binding JSON"),
+            ),
+            (
+                "response",
+                serde_json::to_value(&binding_response_v3).expect("v3 response JSON"),
+            ),
+        ] {
+            value
+                .as_object_mut()
+                .expect("v3 wire object")
+                .insert("unknown".into(), serde_json::Value::Bool(true));
+            let rejected = match name {
+                "request" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+                >(value)
+                .is_err(),
+                "binding" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingV3,
+                >(value)
+                .is_err(),
+                "response" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingResponseV3,
+                >(value)
+                .is_err(),
+                _ => unreachable!(),
+            };
+            assert!(rejected, "unknown V3 {name} fields must refuse");
+        }
     }
 
     #[test]
@@ -11464,5 +11898,157 @@ mod tests {
             .expect("snapshot object")
             .insert("unknown".into(), serde_json::Value::Bool(true));
         assert!(serde_json::from_value::<ProtectedAuthoritySnapshotPayloadV1>(unknown).is_err());
+    }
+
+    #[test]
+    fn v3_binding_requires_exact_transport_dependency_record_identity() {
+        let continuation = secret_delivery_startup_continuation();
+        let snapshot_request = authority_snapshot_request();
+        let snapshot_response = authority_snapshot_response(&snapshot_request);
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let request = secret_delivery_transaction_binding_request_v3(&snapshot_response);
+        let response = secret_delivery_transaction_binding_response_v3(&request, &evidence);
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+
+        reconcile_protected_launcher_secret_delivery_transaction_binding_v3(
+            &request,
+            &response,
+            &snapshot_request,
+            &snapshot_response,
+            &continuation,
+            &prelude,
+            &evidence,
+            snapshot_request.challenge.issued_at_unix_seconds,
+        )
+        .expect("snapshot- and transport-bound V3 binding reconciles");
+
+        assert_eq!(
+            request.identity,
+            "sha256:1cb85e139a74709ec675b468a55d5dccfb899ad6a6d75a6c4894006c0c0f014d",
+            "V3 request identity drifted"
+        );
+        assert_eq!(
+            response.binding.identity,
+            "sha256:f17664660a7d2ec6f9496bdbe521208e91001e101de8b228fc221a036de5b74f",
+            "V3 binding identity drifted"
+        );
+
+        let mut substituted_request = request.clone();
+        substituted_request.transport_dependency_record_identity =
+            format!("sha256:{}", "e".repeat(64));
+        substituted_request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v3_identity(
+                &substituted_request,
+            )
+            .expect("self-consistent substituted request identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
+                &substituted_request,
+                &response,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a substituted request record identity cannot reuse the retained response"
+        );
+
+        let mut substituted_response = response.clone();
+        substituted_response
+            .binding
+            .transport_dependency_record_identity = format!("sha256:{}", "e".repeat(64));
+        substituted_response.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v3_identity(
+                &substituted_response.binding,
+            )
+            .expect("self-consistent substituted binding identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
+                &request,
+                &substituted_response,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a substituted binding record identity cannot satisfy the retained request"
+        );
+
+        let mut missing_request = serde_json::to_value(&request).expect("V3 request JSON");
+        missing_request
+            .as_object_mut()
+            .expect("V3 request object")
+            .remove("transport_dependency_record_identity");
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingRequestV3>(
+                missing_request
+            )
+            .is_err(),
+            "a V3 request without transport provenance must refuse"
+        );
+
+        let mut missing_binding = serde_json::to_value(&response.binding).expect("V3 binding JSON");
+        missing_binding
+            .as_object_mut()
+            .expect("V3 binding object")
+            .remove("transport_dependency_record_identity");
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingV3>(
+                missing_binding,
+            )
+            .is_err(),
+            "a V3 binding without transport provenance must refuse"
+        );
+
+        let mut malformed_request = request.clone();
+        malformed_request.transport_dependency_record_identity = "sha256:changed".into();
+        assert_eq!(
+            protected_launcher_secret_delivery_transaction_binding_request_v3_identity(
+                &malformed_request,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a malformed request transport identity must refuse before identity derivation"
+        );
+
+        let mut malformed_binding = response.binding.clone();
+        malformed_binding.transport_dependency_record_identity =
+            format!("sha256:{}", "A".repeat(64));
+        assert_eq!(
+            protected_launcher_secret_delivery_transaction_binding_v3_identity(&malformed_binding,),
+            Err(ProtocolError::InvalidRecord),
+            "a noncanonical binding transport identity must refuse before identity derivation"
+        );
+
+        let v2_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingRequestV3>(
+                serde_json::to_value(&v2_request).expect("V2 request JSON")
+            )
+            .is_err(),
+            "an immutable V2 request cannot silently fall back into V3"
+        );
+        let v2_response = secret_delivery_transaction_binding_response_v2(&v2_request, &evidence);
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingV3>(
+                serde_json::to_value(&v2_response.binding).expect("V2 binding JSON"),
+            )
+            .is_err(),
+            "an immutable V2 binding cannot silently fall back into V3"
+        );
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingResponseV3>(
+                serde_json::to_value(v2_response).expect("V2 response JSON")
+            )
+            .is_err(),
+            "an immutable V2 response cannot silently fall back into V3"
+        );
     }
 }
