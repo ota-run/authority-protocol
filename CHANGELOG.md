@@ -26,6 +26,11 @@
 
 ## Unreleased
 
+- Add closed V4 same-child transaction-binding request, binding, and response records that
+  reconcile only an exact V2 authority snapshot. All three carriers bind the snapshot schema and
+  kind alongside its identity and the existing transport-dependency record identity. V3 remains
+  immutable and V4 structural reconciliation adds no provider, execution, or delivery path.
+
 - Add closed V2 protected-authority snapshot request, payload, and response records. V2 retains
   descriptor-bound canonical raw verifier and binding stores once, rejects noncanonical or
   duplicate-key raw carriers, preserves the 64 KiB frame bound, and keeps V1 immutable. Protocol

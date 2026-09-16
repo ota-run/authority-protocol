@@ -78,6 +78,10 @@ This repository owns:
   fixed one-frame bound. Protocol structurally decodes and reconciles those records only; it does
   not verify the bundle signature, load stores, compare administrator dependency expectations, or
   authorize a V4 transaction, network request, provider operation, delivery, or execution;
+- additive V4 transaction-binding records that require the exact V2 snapshot identity, schema,
+  and kind across request, private binding, and response, while retaining V3's same-child and
+  transport-dependency reconciliation. These are structural records; Launcher and Core still own
+  their respective authority, signature, candidate, and one-use runtime checks;
 - closed protected secret-delivery verifier-store and binding-bundle records. The store admits
   exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an
   opaque, bounded payload identity and domain-separated Ed25519 signature envelope without making
