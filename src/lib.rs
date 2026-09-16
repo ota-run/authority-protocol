@@ -113,6 +113,10 @@ pub const PROTECTED_AUTHORITY_SNAPSHOT_CHALLENGE: &str = "protected_authority_sn
 pub const PROTECTED_AUTHORITY_SNAPSHOT_REQUEST: &str = "protected_authority_snapshot_request";
 pub const PROTECTED_AUTHORITY_SNAPSHOT: &str = "protected_authority_snapshot";
 pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE: &str = "protected_authority_snapshot_response";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_V2: &str = "protected_authority_snapshot_request_v2";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_V2: &str = "protected_authority_snapshot_v2";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_V2: &str =
+    "protected_authority_snapshot_response_v2";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V2: &str =
     "protected_launcher_secret_delivery_transaction_binding_request_v2";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V2: &str =
@@ -242,6 +246,12 @@ pub const PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-authority-snapshot.v1\0";
 pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.protected-authority-snapshot-response.v1\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.protected-authority-snapshot-request.v2\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.protected-authority-snapshot.v2\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.protected-authority-snapshot-response.v2\0";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V2:
     &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v2\0";
 pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V2: &[u8] =
@@ -855,6 +865,53 @@ pub struct ProtectedAuthoritySnapshotResponseV1 {
     pub identity: String,
     pub request_identity: String,
     pub payload: ProtectedAuthoritySnapshotPayloadV1,
+    pub protected_snapshot_identity: String,
+}
+
+/// Additive Core-to-Launcher request for a bounded authority snapshot without duplicate stores.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotRequestV2 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub challenge: ProtectedAuthoritySnapshotChallengeV1,
+    /// Private, canonical unpadded base64url 32-byte value. It never leaves this request.
+    pub nonce: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub contract_identity: String,
+    pub selected_execution_graph_identity: String,
+}
+
+/// Closed unsigned snapshot with raw descriptor-bound stores represented exactly once.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotPayloadV2 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub contract_identity: String,
+    pub selected_execution_graph_identity: String,
+    pub verifier_store_descriptor: ProtectedLauncherDescriptorV1,
+    pub binding_store_descriptor: ProtectedLauncherDescriptorV1,
+    pub verifier_store_bytes: String,
+    pub binding_store_bytes: String,
+}
+
+/// Additive Launcher response carrying one private V2 authority snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotResponseV2 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub payload: ProtectedAuthoritySnapshotPayloadV2,
     pub protected_snapshot_identity: String,
 }
 
@@ -3377,6 +3434,241 @@ pub fn reconcile_protected_authority_snapshot_response_v1(
     reconcile_protected_secret_delivery_authority_bundle_v1(
         &response.payload.verifier_store,
         &response.payload.binding_bundle,
+        observed_at_unix_seconds,
+    )
+}
+
+pub fn protected_authority_snapshot_request_v2_identity(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 2
+        || request.message_kind != PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_V2
+        || request.challenge.identity
+            != protected_authority_snapshot_challenge_v1_identity(&request.challenge)?
+        || !is_canonical_base64url_32_bytes(&request.nonce)
+        || [
+            &request.launcher_request_identity,
+            &request.startup_continuation_identity,
+            &request.contract_identity,
+            &request.selected_execution_graph_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let nonce = URL_SAFE_NO_PAD
+        .decode(&request.nonce)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if protected_authority_snapshot_nonce_commitment_v1(&nonce)?
+        != request.challenge.nonce_commitment
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V2,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_authority_snapshot_request_v2(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if request.identity != protected_authority_snapshot_request_v2_identity(request)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_authority_snapshot_challenge_v1(&request.challenge, observed_at_unix_seconds)
+}
+
+pub fn reconcile_protected_authority_snapshot_request_v2(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+    startup_continuation: &LauncherStartupContinuationV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    validate_protected_authority_snapshot_request_v2(request, observed_at_unix_seconds)?;
+    if startup_continuation.identity
+        != launcher_startup_continuation_identity(startup_continuation)?
+        || request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_authority_snapshot_payload_v2_identity(
+    payload: &ProtectedAuthoritySnapshotPayloadV2,
+) -> Result<String, ProtocolError> {
+    validate_protected_authority_snapshot_payload_v2(payload).map(|_| ())?;
+    protected_authority_snapshot_payload_v2_identity_validated(payload)
+}
+
+fn protected_authority_snapshot_payload_v2_identity_validated(
+    payload: &ProtectedAuthoritySnapshotPayloadV2,
+) -> Result<String, ProtocolError> {
+    message_identity(PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V2, payload)
+}
+
+fn validate_protected_authority_snapshot_payload_v2(
+    payload: &ProtectedAuthoritySnapshotPayloadV2,
+) -> Result<
+    (
+        ProtectedSecretDeliveryVerifierStoreV1,
+        ProtectedSecretDeliveryBindingBundleV1,
+    ),
+    ProtocolError,
+> {
+    if payload.schema_version != 2
+        || payload.record_kind != PROTECTED_AUTHORITY_SNAPSHOT_V2
+        || [
+            &payload.request_identity,
+            &payload.launcher_request_identity,
+            &payload.startup_continuation_identity,
+            &payload.contract_identity,
+            &payload.selected_execution_graph_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || payload.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                payload.startup_continuation_identity.as_str(),
+            )?
+        || payload.verifier_store_descriptor.role
+            != ProtectedLauncherDescriptorRoleV1::VerifierStore
+        || payload.binding_store_descriptor.role != ProtectedLauncherDescriptorRoleV1::BindingStore
+        || protected_launcher_descriptor_v1_identity(&payload.verifier_store_descriptor)?
+            != payload.verifier_store_descriptor.identity
+        || protected_launcher_descriptor_v1_identity(&payload.binding_store_descriptor)?
+            != payload.binding_store_descriptor.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let verifier_bytes = protected_authority_snapshot_store_bytes(&payload.verifier_store_bytes)?;
+    let binding_bytes = protected_authority_snapshot_store_bytes(&payload.binding_store_bytes)?;
+    let verifier_store =
+        serde_json::from_slice::<ProtectedSecretDeliveryVerifierStoreV1>(&verifier_bytes)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    let binding_bundle =
+        serde_json::from_slice::<ProtectedSecretDeliveryBindingBundleV1>(&binding_bytes)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    if serde_jcs::to_vec(&verifier_store).map_err(|_| ProtocolError::Canonicalization)?
+        != verifier_bytes
+        || serde_jcs::to_vec(&binding_bundle).map_err(|_| ProtocolError::Canonicalization)?
+            != binding_bytes
+        || payload.verifier_store_descriptor.size != verifier_bytes.len() as u64
+        || payload.binding_store_descriptor.size != binding_bytes.len() as u64
+        || (
+            payload.verifier_store_descriptor.device,
+            payload.verifier_store_descriptor.inode,
+        ) == (
+            payload.binding_store_descriptor.device,
+            payload.binding_store_descriptor.inode,
+        )
+        || payload
+            .verifier_store_descriptor
+            .content_identity
+            .as_deref()
+            != Some(
+                protected_launcher_store_content_identity_v1(
+                    ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                    &verifier_bytes,
+                )?
+                .as_str(),
+            )
+        || payload.binding_store_descriptor.content_identity.as_deref()
+            != Some(
+                protected_launcher_store_content_identity_v1(
+                    ProtectedLauncherDescriptorRoleV1::BindingStore,
+                    &binding_bytes,
+                )?
+                .as_str(),
+            )
+        || protected_secret_delivery_verifier_store_v1_identity(&verifier_store)?
+            != verifier_store.identity
+        || protected_secret_delivery_binding_bundle_v1_identity(&binding_bundle)?
+            != binding_bundle.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok((verifier_store, binding_bundle))
+}
+
+pub fn protected_authority_snapshot_response_v2_identity(
+    response: &ProtectedAuthoritySnapshotResponseV2,
+) -> Result<String, ProtocolError> {
+    validate_protected_authority_snapshot_payload_v2(&response.payload)?;
+    protected_authority_snapshot_response_v2_identity_validated(response)
+}
+
+fn protected_authority_snapshot_response_v2_identity_validated(
+    response: &ProtectedAuthoritySnapshotResponseV2,
+) -> Result<String, ProtocolError> {
+    if response.schema_version != 2
+        || response.message_kind != PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_V2
+        || !is_sha256_identity(&response.request_identity)
+        || response.protected_snapshot_identity
+            != protected_authority_snapshot_payload_v2_identity_validated(&response.payload)?
+        || response.payload.request_identity != response.request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = response.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V2,
+        &canonical,
+    )
+}
+
+fn validate_protected_authority_snapshot_response_v2_frame_size(
+    canonical_response_len: usize,
+) -> Result<(), ProtocolError> {
+    if canonical_response_len > MAX_FRAME_BYTES - std::mem::size_of::<u32>() {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn reconcile_protected_authority_snapshot_response_v2(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+    response: &ProtectedAuthoritySnapshotResponseV2,
+    startup_continuation: &LauncherStartupContinuationV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_authority_snapshot_request_v2(
+        request,
+        startup_continuation,
+        observed_at_unix_seconds,
+    )?;
+    let (verifier_store, binding_bundle) =
+        validate_protected_authority_snapshot_payload_v2(&response.payload)?;
+    if response.identity != protected_authority_snapshot_response_v2_identity_validated(response)?
+        || validate_protected_authority_snapshot_response_v2_frame_size(
+            serde_jcs::to_vec(response)
+                .map_err(|_| ProtocolError::InvalidRecord)?
+                .len(),
+        )
+        .is_err()
+        || response.request_identity != request.identity
+        || response.payload.launcher_request_identity != request.launcher_request_identity
+        || response.payload.startup_continuation_identity != request.startup_continuation_identity
+        || response.payload.session_identity != request.session_identity
+        || response.payload.contract_identity != request.contract_identity
+        || response.payload.selected_execution_graph_identity
+            != request.selected_execution_graph_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    reconcile_protected_secret_delivery_authority_bundle_v1(
+        &verifier_store,
+        &binding_bundle,
         observed_at_unix_seconds,
     )
 }
@@ -6720,6 +7012,88 @@ mod tests {
         response
     }
 
+    fn authority_snapshot_request_v2() -> ProtectedAuthoritySnapshotRequestV2 {
+        let request = authority_snapshot_request();
+        let mut v2 = ProtectedAuthoritySnapshotRequestV2 {
+            schema_version: 2,
+            message_kind: PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_V2.into(),
+            identity: String::new(),
+            challenge: request.challenge,
+            nonce: request.nonce,
+            launcher_request_identity: request.launcher_request_identity,
+            startup_continuation_identity: request.startup_continuation_identity,
+            session_identity: request.session_identity,
+            contract_identity: request.contract_identity,
+            selected_execution_graph_identity: request.selected_execution_graph_identity,
+        };
+        v2.identity = protected_authority_snapshot_request_v2_identity(&v2)
+            .expect("V2 snapshot request identity");
+        v2
+    }
+
+    fn authority_snapshot_response_v2(
+        request: &ProtectedAuthoritySnapshotRequestV2,
+    ) -> ProtectedAuthoritySnapshotResponseV2 {
+        let v1 = authority_snapshot_request();
+        let v1_response = authority_snapshot_response(&v1);
+        let verifier_store_bytes = serde_jcs::to_vec(&v1_response.payload.verifier_store)
+            .expect("canonical verifier store bytes");
+        let binding_store_bytes = serde_jcs::to_vec(&v1_response.payload.binding_bundle)
+            .expect("canonical binding store bytes");
+        let mut verifier_store_descriptor =
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::VerifierStore, 17);
+        verifier_store_descriptor.size = verifier_store_bytes.len() as u64;
+        verifier_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                &verifier_store_bytes,
+            )
+            .expect("V2 verifier store content identity"),
+        );
+        verifier_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&verifier_store_descriptor)
+                .expect("V2 verifier descriptor identity");
+        let mut binding_store_descriptor =
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::BindingStore, 18);
+        binding_store_descriptor.size = binding_store_bytes.len() as u64;
+        binding_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::BindingStore,
+                &binding_store_bytes,
+            )
+            .expect("V2 binding store content identity"),
+        );
+        binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&binding_store_descriptor)
+                .expect("V2 binding descriptor identity");
+        let payload = ProtectedAuthoritySnapshotPayloadV2 {
+            schema_version: 2,
+            record_kind: PROTECTED_AUTHORITY_SNAPSHOT_V2.into(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            contract_identity: request.contract_identity.clone(),
+            selected_execution_graph_identity: request.selected_execution_graph_identity.clone(),
+            verifier_store_descriptor,
+            binding_store_descriptor,
+            verifier_store_bytes: URL_SAFE_NO_PAD.encode(verifier_store_bytes),
+            binding_store_bytes: URL_SAFE_NO_PAD.encode(binding_store_bytes),
+        };
+        let mut response = ProtectedAuthoritySnapshotResponseV2 {
+            schema_version: 2,
+            message_kind: PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_V2.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            protected_snapshot_identity: protected_authority_snapshot_payload_v2_identity(&payload)
+                .expect("V2 snapshot identity"),
+            payload,
+        };
+        response.identity = protected_authority_snapshot_response_v2_identity(&response)
+            .expect("V2 snapshot response identity");
+        response
+    }
+
     fn reidentify_authority_snapshot_response(response: &mut ProtectedAuthoritySnapshotResponseV1) {
         response.payload.verifier_store_descriptor.identity =
             protected_launcher_descriptor_v1_identity(&response.payload.verifier_store_descriptor)
@@ -6732,6 +7106,54 @@ mod tests {
                 .expect("reidentified snapshot");
         response.identity = protected_authority_snapshot_response_v1_identity(response)
             .expect("reidentified snapshot response");
+    }
+
+    fn reidentify_authority_snapshot_response_v2(
+        response: &mut ProtectedAuthoritySnapshotResponseV2,
+    ) {
+        let verifier_bytes = URL_SAFE_NO_PAD
+            .decode(response.payload.verifier_store_bytes.as_bytes())
+            .expect("V2 verifier bytes");
+        let binding_bytes = URL_SAFE_NO_PAD
+            .decode(response.payload.binding_store_bytes.as_bytes())
+            .expect("V2 binding bytes");
+        response.payload.verifier_store_descriptor.size = verifier_bytes.len() as u64;
+        response.payload.binding_store_descriptor.size = binding_bytes.len() as u64;
+        response.payload.verifier_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                &verifier_bytes,
+            )
+            .expect("V2 verifier content identity"),
+        );
+        response.payload.binding_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::BindingStore,
+                &binding_bytes,
+            )
+            .expect("V2 binding content identity"),
+        );
+        response.payload.verifier_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&response.payload.verifier_store_descriptor)
+                .expect("reidentified V2 verifier descriptor");
+        response.payload.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&response.payload.binding_store_descriptor)
+                .expect("reidentified V2 binding descriptor");
+        response.protected_snapshot_identity =
+            protected_authority_snapshot_payload_v2_identity(&response.payload)
+                .expect("reidentified V2 snapshot");
+        response.identity = protected_authority_snapshot_response_v2_identity(response)
+            .expect("reidentified V2 snapshot response");
+    }
+
+    fn reidentify_authority_snapshot_response_v2_unchecked(
+        response: &mut ProtectedAuthoritySnapshotResponseV2,
+    ) {
+        response.protected_snapshot_identity =
+            protected_authority_snapshot_payload_v2_identity_validated(&response.payload)
+                .expect("unchecked V2 snapshot identity");
+        response.identity = protected_authority_snapshot_response_v2_identity_validated(response)
+            .expect("unchecked V2 snapshot response identity");
     }
 
     fn secret_delivery_transaction_binding_request_v2(
@@ -10171,6 +10593,18 @@ mod tests {
             b"ota.protected-authority-snapshot-response.v1\0"
         );
         assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V2,
+            b"ota.protected-authority-snapshot-request.v2\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V2,
+            b"ota.protected-authority-snapshot.v2\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V2,
+            b"ota.protected-authority-snapshot-response.v2\0"
+        );
+        assert_eq!(
             PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V2,
             b"ota.protected-launcher-secret-delivery-transaction-binding-request.v2\0"
         );
@@ -10228,6 +10662,8 @@ mod tests {
 
         let snapshot_request = authority_snapshot_request();
         let snapshot_response = authority_snapshot_response(&snapshot_request);
+        let snapshot_request_v2 = authority_snapshot_request_v2();
+        let snapshot_response_v2 = authority_snapshot_response_v2(&snapshot_request_v2);
         let evidence = secret_delivery_transaction_binding_evidence();
         let binding_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
         let binding_response =
@@ -10249,6 +10685,18 @@ mod tests {
         assert_eq!(
             snapshot_response.identity,
             "sha256:f8590c6da80208f4b3cd402b9474fe25a08ee2aa99acb4706d7ffb6d11bc4a13"
+        );
+        assert_eq!(
+            snapshot_request_v2.identity,
+            "sha256:eb2ed33954601d10e42848b36b062dcf040056bef074e993bb2f1c384be88646"
+        );
+        assert_eq!(
+            snapshot_response_v2.protected_snapshot_identity,
+            "sha256:06c8ec55edb9cadda1743dbed05bc30640799959647014b7219ee20be27bd69a"
+        );
+        assert_eq!(
+            snapshot_response_v2.identity,
+            "sha256:eb168ef10ec601fab734a525df5f6bd0d42791491125794f1024b031fb82f794"
         );
         assert_eq!(
             prelude.identity,
@@ -11285,6 +11733,8 @@ mod tests {
         // shapes here with the established public wire types rather than relying on callers.
         let snapshot_request = authority_snapshot_request();
         let snapshot_response = authority_snapshot_response(&snapshot_request);
+        let snapshot_request_v2 = authority_snapshot_request_v2();
+        let snapshot_response_v2 = authority_snapshot_response_v2(&snapshot_request_v2);
         let evidence = secret_delivery_transaction_binding_evidence();
         let binding_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
         let binding_response =
@@ -11350,6 +11800,49 @@ mod tests {
         );
         assert_keys(
             serde_json::to_value(&snapshot_response).expect("response wire"),
+            &[
+                "identity",
+                "message_kind",
+                "payload",
+                "protected_snapshot_identity",
+                "request_identity",
+                "schema_version",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_request_v2).expect("V2 request wire"),
+            &[
+                "challenge",
+                "contract_identity",
+                "identity",
+                "launcher_request_identity",
+                "message_kind",
+                "nonce",
+                "schema_version",
+                "selected_execution_graph_identity",
+                "session_identity",
+                "startup_continuation_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_response_v2.payload).expect("V2 payload wire"),
+            &[
+                "binding_store_bytes",
+                "binding_store_descriptor",
+                "contract_identity",
+                "launcher_request_identity",
+                "record_kind",
+                "request_identity",
+                "schema_version",
+                "selected_execution_graph_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "verifier_store_bytes",
+                "verifier_store_descriptor",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_response_v2).expect("V2 response wire"),
             &[
                 "identity",
                 "message_kind",
@@ -11898,6 +12391,216 @@ mod tests {
             .expect("snapshot object")
             .insert("unknown".into(), serde_json::Value::Bool(true));
         assert!(serde_json::from_value::<ProtectedAuthoritySnapshotPayloadV1>(unknown).is_err());
+    }
+
+    #[test]
+    fn protected_authority_snapshot_v2_retains_canonical_stores_once() {
+        let continuation = secret_delivery_startup_continuation();
+        let request = authority_snapshot_request_v2();
+        let response = authority_snapshot_response_v2(&request);
+        reconcile_protected_authority_snapshot_response_v2(
+            &request,
+            &response,
+            &continuation,
+            request.challenge.issued_at_unix_seconds,
+        )
+        .expect("V2 snapshot response reconciles");
+        assert!(
+            serde_jcs::to_vec(&response)
+                .expect("canonical V2 response")
+                .len()
+                <= MAX_FRAME_BYTES - std::mem::size_of::<u32>(),
+            "the V2 response remains one frame including its four-byte prefix"
+        );
+
+        assert!(
+            validate_protected_authority_snapshot_response_v2_frame_size(
+                MAX_FRAME_BYTES - std::mem::size_of::<u32>(),
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_protected_authority_snapshot_response_v2_frame_size(
+                MAX_FRAME_BYTES - std::mem::size_of::<u32>() + 1,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a response larger than one framed V2 message refuses"
+        );
+
+        let mut noncanonical = response.payload.clone();
+        let mut bytes = URL_SAFE_NO_PAD
+            .decode(noncanonical.binding_store_bytes.as_bytes())
+            .expect("binding store bytes");
+        bytes.push(b'\n');
+        noncanonical.binding_store_bytes = URL_SAFE_NO_PAD.encode(bytes);
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&noncanonical),
+            Err(ProtocolError::InvalidRecord),
+            "a semantically equivalent but noncanonical raw store is not a V2 carrier"
+        );
+
+        let mut verifier_noncanonical = response.payload.clone();
+        let mut verifier_bytes = URL_SAFE_NO_PAD
+            .decode(verifier_noncanonical.verifier_store_bytes.as_bytes())
+            .expect("verifier store bytes");
+        verifier_bytes.push(b'\n');
+        verifier_noncanonical.verifier_store_bytes = URL_SAFE_NO_PAD.encode(verifier_bytes);
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&verifier_noncanonical),
+            Err(ProtocolError::InvalidRecord),
+            "the verifier store must also be canonical JCS"
+        );
+
+        let mut duplicate_key = response.payload.clone();
+        let binding_bytes = URL_SAFE_NO_PAD
+            .decode(duplicate_key.binding_store_bytes.as_bytes())
+            .expect("binding store bytes");
+        let mut duplicate_json = String::from_utf8(binding_bytes).expect("binding JSON");
+        duplicate_json.insert_str(
+            duplicate_json.len() - 1,
+            ",\"identity\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+        );
+        duplicate_key.binding_store_bytes = URL_SAFE_NO_PAD.encode(duplicate_json.as_bytes());
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&duplicate_key),
+            Err(ProtocolError::InvalidRecord),
+            "duplicate JSON keys cannot bypass raw canonical-store equality"
+        );
+
+        let mut malformed_base64 = response.payload.clone();
+        malformed_base64.binding_store_bytes = "!".into();
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&malformed_base64),
+            Err(ProtocolError::InvalidRecord),
+            "malformed protected store bytes refuse"
+        );
+
+        let mut role_substitution = response.payload.clone();
+        role_substitution.binding_store_descriptor.role =
+            ProtectedLauncherDescriptorRoleV1::VerifierStore;
+        role_substitution.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&role_substitution.binding_store_descriptor)
+                .expect("reidentified substituted role");
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&role_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "descriptor roles are not interchangeable"
+        );
+
+        let mut inode_substitution = response.payload.clone();
+        inode_substitution.binding_store_descriptor.device =
+            inode_substitution.verifier_store_descriptor.device;
+        inode_substitution.binding_store_descriptor.inode =
+            inode_substitution.verifier_store_descriptor.inode;
+        inode_substitution.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&inode_substitution.binding_store_descriptor)
+                .expect("reidentified substituted inode");
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&inode_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "the two retained stores require distinct filesystem identities"
+        );
+
+        let mut recomputed_context_substitution = response.clone();
+        recomputed_context_substitution.payload.contract_identity =
+            format!("sha256:{}", "c".repeat(64));
+        reidentify_authority_snapshot_response_v2(&mut recomputed_context_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &recomputed_context_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent payload from another contract cannot satisfy the retained request"
+        );
+
+        let mut request_substitution = response.clone();
+        request_substitution.request_identity = format!("sha256:{}", "d".repeat(64));
+        request_substitution.payload.request_identity =
+            request_substitution.request_identity.clone();
+        reidentify_authority_snapshot_response_v2(&mut request_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &request_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response cannot substitute its retained request"
+        );
+
+        let mut schema_substitution = response.clone();
+        schema_substitution.payload.schema_version = 1;
+        reidentify_authority_snapshot_response_v2_unchecked(&mut schema_substitution);
+        assert_eq!(
+            protected_authority_snapshot_response_v2_identity(&schema_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent V1 payload cannot enter a V2 response"
+        );
+
+        let mut kind_substitution = response.clone();
+        kind_substitution.payload.record_kind = PROTECTED_AUTHORITY_SNAPSHOT.into();
+        reidentify_authority_snapshot_response_v2_unchecked(&mut kind_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &kind_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response with another payload kind refuses"
+        );
+
+        let mut descriptor_role_substitution = response.clone();
+        descriptor_role_substitution
+            .payload
+            .binding_store_descriptor
+            .role = ProtectedLauncherDescriptorRoleV1::VerifierStore;
+        descriptor_role_substitution
+            .payload
+            .binding_store_descriptor
+            .identity = protected_launcher_descriptor_v1_identity(
+            &descriptor_role_substitution
+                .payload
+                .binding_store_descriptor,
+        )
+        .expect("reidentified substituted descriptor role");
+        reidentify_authority_snapshot_response_v2_unchecked(&mut descriptor_role_substitution);
+        assert_eq!(
+            protected_authority_snapshot_response_v2_identity(&descriptor_role_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response cannot substitute a descriptor role"
+        );
+
+        let mut descriptor_identity_substitution = response.clone();
+        descriptor_identity_substitution
+            .payload
+            .binding_store_descriptor
+            .identity = format!("sha256:{}", "e".repeat(64));
+        reidentify_authority_snapshot_response_v2_unchecked(&mut descriptor_identity_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &descriptor_identity_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response cannot substitute a descriptor identity"
+        );
+
+        let mut v1_fallback = request.clone();
+        v1_fallback.schema_version = 1;
+        v1_fallback.message_kind = PROTECTED_AUTHORITY_SNAPSHOT_REQUEST.into();
+        assert_eq!(
+            protected_authority_snapshot_request_v2_identity(&v1_fallback),
+            Err(ProtocolError::InvalidRecord),
+            "V2 cannot reinterpret a V1 request"
+        );
     }
 
     #[test]

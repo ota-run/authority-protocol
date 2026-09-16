@@ -73,6 +73,11 @@ This repository owns:
   validates only that closed identity relationship. Core retains ownership of the complete expected
   dependency graph and record, Cargo resolution, semantic comparison, and candidate derivation;
   the V3 exchange grants no installation authority and opens no transport or provider path;
+- additive V2 protected-authority snapshot records that retain descriptor-bound verifier and binding
+  stores only as canonical raw bytes, avoiding V1's duplicate parsed carriers while retaining the
+  fixed one-frame bound. Protocol structurally decodes and reconciles those records only; it does
+  not verify the bundle signature, load stores, compare administrator dependency expectations, or
+  authorize a V4 transaction, network request, provider operation, delivery, or execution;
 - closed protected secret-delivery verifier-store and binding-bundle records. The store admits
   exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an
   opaque, bounded payload identity and domain-separated Ed25519 signature envelope without making

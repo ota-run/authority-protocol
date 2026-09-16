@@ -26,6 +26,13 @@
 
 ## Unreleased
 
+- Add closed V2 protected-authority snapshot request, payload, and response records. V2 retains
+  descriptor-bound canonical raw verifier and binding stores once, rejects noncanonical or
+  duplicate-key raw carriers, preserves the 64 KiB frame bound, and keeps V1 immutable. Protocol
+  structurally reconciles records only; it does not load stores, verify bundle signatures, compare
+  administrator expectations, issue a V4 binding, contact a network or provider, deliver secrets,
+  execute, or create evidence.
+
 - Raise the closed protected secret-delivery binding-bundle payload limit from 32 KiB to 40 KiB
   so an administrator-controlled bundle can retain Core's complete bounded transport-dependency
   graph and record while the canonical signed bundle remains within the existing 64 KiB protected
