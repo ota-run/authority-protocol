@@ -67,7 +67,7 @@ pub const MAX_HISTORY_CHUNK_PAYLOAD_BYTES_V1: usize = 15 * 1024;
 pub const MAX_HISTORY_RESPONSE_BYTES_V1: u64 = 16 * 1024 * 1024;
 pub const MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1: usize = 64 * 1024;
 /// Leaves room for the enclosing canonical signed bundle within one protected store file.
-pub const MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1: usize = 32 * 1024;
+pub const MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1: usize = 40 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
 pub const ATTESTATION_RESPONSE: &str = "attestation_response";

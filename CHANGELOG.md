@@ -26,6 +26,13 @@
 
 ## Unreleased
 
+- Raise the closed protected secret-delivery binding-bundle payload limit from 32 KiB to 40 KiB
+  so an administrator-controlled bundle can retain Core's complete bounded transport-dependency
+  graph and record while the canonical signed bundle remains within the existing 64 KiB protected
+  store limit. This is a structural size-bound adjustment only; Protocol does not derive the graph,
+  load an installation, grant provider authority, open a network path, deliver secrets, execute,
+  or create evidence.
+
 - Add immutable V3 protected Launcher secret-delivery transaction-binding records. V3 preserves
   V2 unchanged while binding one exact transport-dependency-record identity into the request and
   private binding, with closed wire shapes, domain-separated identities, exact reconciliation, and
