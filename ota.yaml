@@ -26,6 +26,8 @@ project:
   description: Canonical wire protocol and conformance model for Ota crossing authority
   type: library
 metadata:
+  ota:
+    minimum_version: "1.6.28"
   team: Engineering
   owner: ota
   repo_class: oss
@@ -57,12 +59,18 @@ tasks:
     safe_for_agent: true
   test:
     description: Run protocol conformance tests
+    notes: |
+      Tests framing, canonical serialization, identities, and adversarial conformance vectors.
+      It does not issue authority, consume leases, or execute a governed repository task.
     category: test
     command: { exe: cargo, args: [test, --locked, --all-targets] }
     requirements: { toolchains: [rust] }
     safe_for_agent: true
   verify:
     description: Run the complete protocol verification suite
+    notes: |
+      This is the only routine verification front door. Cross-repository compatibility still
+      requires Core and Launcher consumers to pin and test this exact immutable revision.
     category: test
     aggregate: { tasks: [fmt, check, clippy, test] }
     safe_for_agent: true
@@ -70,16 +78,30 @@ workflows:
   default: verify
   verify:
     intent: verification
+    description: Canonical local Rust verification for the protocol crate
     run: { task: verify }
+    notes: |
+      Use this for protocol-source changes. It proves this crate's local conformance suite, not
+      protected launcher deployment, signing-key authority, broker persistence, or execution.
 agent:
   entrypoint: verify
   default_task: verify
   safe_tasks: [fmt, check, clippy, test, verify]
   verify_after_changes: [verify]
   writable_paths: [src, README.md, CHANGELOG.md, Cargo.toml, rust-toolchain.toml]
-  protected_paths: [Cargo.lock, ota.yaml, LICENSE]
+  protected_paths: [.github, AGENTS.md, Cargo.lock, ota.yaml, LICENSE]
   bootstrap:
     ota:
+      note: This contract is verified against the immutable Ota Core revision below; do not replace it with a branch or ambient binary in review or CI.
       source:
         kind: git_rev
-        rev: 0011e64ab545ef3eb34602ce5469a2f779c870ea
+        rev: 63297ad95ef156b335a1dfb54090146406077a3f
+  notes: |
+    Start with `ota tasks --safe --use`, then use `ota run verify --agent` after source changes.
+    If Ota does not report a lane callable, stop; do not drop `--agent` or invoke Cargo directly.
+    This repository owns protocol structure and conformance, not repository admission, broker
+    authority, protected-store loading, signing keys, provider contact, or governed execution.
+
+    Keep message kinds, identity domains, framing, and compatibility records review-bound across
+    Ota Core and authority-launcher. Do not use a locally passing protocol suite as evidence that
+    a launcher, broker, protected runner, or provider boundary is deployed or authorized.

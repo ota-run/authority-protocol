@@ -26,6 +26,84 @@
 
 ## Unreleased
 
+- Add closed V4 same-child transaction-binding request, binding, and response records that
+  reconcile only an exact V2 authority snapshot. All three carriers bind the snapshot schema and
+  kind alongside its identity and the existing transport-dependency record identity. V3 remains
+  immutable and V4 structural reconciliation adds no provider, execution, or delivery path.
+
+- Add closed V2 protected-authority snapshot request, payload, and response records. V2 retains
+  descriptor-bound canonical raw verifier and binding stores once, rejects noncanonical or
+  duplicate-key raw carriers, preserves the 64 KiB frame bound, and keeps V1 immutable. Protocol
+  structurally reconciles records only; it does not load stores, verify bundle signatures, compare
+  administrator expectations, issue a V4 binding, contact a network or provider, deliver secrets,
+  execute, or create evidence.
+
+- Raise the closed protected secret-delivery binding-bundle payload limit from 32 KiB to 40 KiB
+  so an administrator-controlled bundle can retain Core's complete bounded transport-dependency
+  graph and record while the canonical signed bundle remains within the existing 64 KiB protected
+  store limit. This is a structural size-bound adjustment only; Protocol does not derive the graph,
+  load an installation, grant provider authority, open a network path, deliver secrets, execute,
+  or create evidence.
+
+- Add immutable V3 protected Launcher secret-delivery transaction-binding records. V3 preserves
+  V2 unchanged while binding one exact transport-dependency-record identity into the request and
+  private binding, with closed wire shapes, domain-separated identities, exact reconciliation, and
+  substitution refusal. Protocol does not carry or interpret the dependency graph, establish
+  installation authority, select transport configuration, open a network path, contact a provider,
+  materialize or deliver secrets, execute a child, or create evidence.
+
+- Add closed private protected-authority snapshot challenge, request, payload, and response
+  records with a separate 256-bit nonce commitment, five-minute freshness bound, exact
+  descriptor/byte/store/bundle reconciliation, and a single-frame transport bound. Add immutable
+  snapshot-bound V2 secret-delivery transaction-binding records; V1 cannot select a snapshot. The
+  protocol remains structural: it does not open protected files, reserve replay state, verify live
+  descriptor provenance or bundle signatures, parse provider bindings, contact a provider,
+  materialize or deliver secrets, execute a child, or create evidence.
+
+- Add the closed same-execution secret-delivery transaction-binding exchange. The selected Core
+  child carries only the exact Launcher request identity retained in its startup continuation.
+  Canonical preflight reconciliation binds the request to that retained continuation before
+  protected derivation, signing, or replay mutation. Launcher-owned reconciliation then binds
+  private capability evidence before returning the binding and signed public projection;
+  Core-visible reconciliation separately binds the response to its
+  retained request and independently loaded verifier and installation identities. Protocol does
+  not perform signature policy, open provider authority, contact a provider, deliver a secret, or
+  activate execution.
+
+- Add closed protected secret-delivery verifier-store and binding-bundle records. The root-owned
+  verifier store admits exactly one public verification key and pins exactly one current bundle generation;
+  the bundle binds only a bounded opaque payload identity and a domain-separated Ed25519 signature
+  envelope. Protocol validates canonical structure and store-to-bundle reconciliation only. It does
+  not load protected files, verify signatures, parse provider bindings, establish authority, contact
+  a provider, materialize or deliver secrets, execute a child, or create evidence.
+
+- Add immutable `ota.authority-launcher.systemd/v4` for protected boot observation without
+  reinterpreting V3. V4 retains `ProtectProc=invisible` and `ProcSubset=pid`, binds one named
+  read-only systemd-manager-opened boot-ID file and one named launcher listener, and requires the
+  V4 public capability-observation class. Historical V3 implementation subjects remain valid only
+  with the exact V3 profile identity. The existing V3 attestation envelope accepts either exact
+  profile and reconciles its required observation set; unknown or cross-profile substitution
+  refuses. Protocol defines this structure only and does not open descriptors, launch processes,
+  or activate provider access.
+
+- Add closed, domain-separated records for the independently administered runner authority, exact
+  protected Launcher/Ota implementation subject, and their future installer-owned authority
+  context. The administrator identity includes a canonical 256-bit instance identifier so unrelated
+  authorities cannot alias through a shared label. Add distinct 256-bit invocation-nonce and
+  non-nil canonical Linux boot-UUID identity domains. Protocol validates structure and semantic
+  identity only; it does not install authority, observe procfs, generate runtime nonces, reconcile
+  executables, or activate a Launcher service route.
+
+- Add the closed protected-capability observation challenge, public projection, and administrator-
+  installed verifier records. The challenge binds one fresh workflow invocation with a five-minute
+  maximum lifetime. The projection hashes an unsigned JCS payload and signs its identity under a
+  separate Ed25519 domain; the verifier record binds the exact public key, key usage, and signature
+  domain. A protected Launcher-to-Attestor signing envelope binds one exact private capability,
+  public payload, projection identity, producer binding, and verifier identity without returning
+  private capability truth. Cross-record reconciliation requires the returned request, payload, and
+  projection identities to equal the retained signing request. These records grant no provider
+  authority, contact, delivery, execution approval, receipt, or assurance.
+
 - Reconcile the README with the implemented protocol boundary: remove stale preview/planned
   wording, distinguish versioned conformance-tested source from a stable crate release, and show
   the protected attestation producer separately from broker authorization in the wire sequence.

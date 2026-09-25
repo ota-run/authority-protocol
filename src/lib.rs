@@ -25,6 +25,9 @@
 //! This crate deliberately contains no authority-selection, trust-root, approval, persistence,
 //! execution, receipt, or archive policy.
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -43,6 +46,7 @@ pub const SYSTEMD_PROTECTED_HISTORY_PROTOCOL_V1: &str = "ota-authority-history/s
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V1: &str = "ota.authority-launcher.systemd/v1";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V2: &str = "ota.authority-launcher.systemd/v2";
 pub const SYSTEMD_LAUNCHER_PROFILE_ID_V3: &str = "ota.authority-launcher.systemd/v3";
+pub const SYSTEMD_LAUNCHER_PROFILE_ID_V4: &str = "ota.authority-launcher.systemd/v4";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1: &str = "ota.authority-job-principal.systemd/v1";
 pub const SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V2: &str = "ota.authority-job-principal.systemd/v2";
 pub const SYSTEMD_ATTESTOR_SOCKET_PATH_V1: &str = "/run/ota/authority-attestor.sock";
@@ -61,6 +65,9 @@ pub const MAX_LAUNCHER_OUTPUT_PAYLOAD_BYTES_V1: usize = 15 * 1024;
 pub const MAX_HISTORY_ENTRY_COUNT_V1: usize = 256;
 pub const MAX_HISTORY_CHUNK_PAYLOAD_BYTES_V1: usize = 15 * 1024;
 pub const MAX_HISTORY_RESPONSE_BYTES_V1: u64 = 16 * 1024 * 1024;
+pub const MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1: usize = 64 * 1024;
+/// Leaves room for the enclosing canonical signed bundle within one protected store file.
+pub const MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1: usize = 40 * 1024;
 
 pub const CHALLENGE_REQUEST: &str = "challenge_request";
 pub const ATTESTATION_RESPONSE: &str = "attestation_response";
@@ -76,6 +83,70 @@ pub const LEASE_CONSUME_RESPONSE: &str = "lease_consume_response";
 pub const LEASE_CONSUMPTION_QUERY: &str = "lease_consumption_query";
 pub const LEASE_CONSUMPTION_STATUS: &str = "lease_consumption_status";
 pub const LAUNCHER_INVOCATION_REQUEST: &str = "launcher_invocation_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY: &str = "protected_launcher_capability";
+pub const RUNNER_ADMINISTRATOR_AUTHORITY: &str = "runner_administrator_authority";
+pub const PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT: &str =
+    "protected_launcher_implementation_subject";
+pub const PROTECTED_LAUNCHER_AUTHORITY_CONTEXT: &str = "protected_launcher_authority_context";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE: &str =
+    "protected_launcher_capability_observation_challenge";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION: &str =
+    "protected_launcher_capability_observation";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST: &str =
+    "protected_launcher_capability_observation_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST: &str =
+    "protected_launcher_capability_observation_probe_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE: &str =
+    "protected_launcher_capability_observation_response";
+pub const PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE: &str = "protected_same_child_capability_prelude";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST: &str =
+    "protected_launcher_capability_observation_signing_request";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE: &str =
+    "protected_launcher_capability_observation_signing_response";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST: &str =
+    "protected_launcher_secret_delivery_transaction_binding_request";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE: &str =
+    "protected_launcher_secret_delivery_transaction_binding_response";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING: &str =
+    "protected_launcher_secret_delivery_transaction_binding";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_CHALLENGE: &str = "protected_authority_snapshot_challenge";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_REQUEST: &str = "protected_authority_snapshot_request";
+pub const PROTECTED_AUTHORITY_SNAPSHOT: &str = "protected_authority_snapshot";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE: &str = "protected_authority_snapshot_response";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_V2: &str = "protected_authority_snapshot_request_v2";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_V2: &str = "protected_authority_snapshot_v2";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_V2: &str =
+    "protected_authority_snapshot_response_v2";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V2: &str =
+    "protected_launcher_secret_delivery_transaction_binding_request_v2";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V2: &str =
+    "protected_launcher_secret_delivery_transaction_binding_v2";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V2: &str =
+    "protected_launcher_secret_delivery_transaction_binding_response_v2";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V3: &str =
+    "protected_launcher_secret_delivery_transaction_binding_request_v3";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V3: &str =
+    "protected_launcher_secret_delivery_transaction_binding_v3";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V3: &str =
+    "protected_launcher_secret_delivery_transaction_binding_response_v3";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V4: &str =
+    "protected_launcher_secret_delivery_transaction_binding_request_v4";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V4: &str =
+    "protected_launcher_secret_delivery_transaction_binding_v4";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V4: &str =
+    "protected_launcher_secret_delivery_transaction_binding_response_v4";
+pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER: &str =
+    "protected_launcher_capability_projection_verifier";
+pub const PROTECTED_SECRET_DELIVERY_VERIFIER_STORE: &str =
+    "protected_secret_delivery_verifier_store";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE: &str =
+    "protected_secret_delivery_binding_bundle";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER: &str =
+    "protected_secret_delivery_binding_bundle_verifier";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1: &str =
+    "protected_launcher_capability_observation_projection";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_USAGE_V1: &str =
+    "protected_secret_delivery_binding_bundle";
 pub const LAUNCHER_STARTUP_CONTINUATION: &str = "launcher_startup_continuation";
 pub const LAUNCHER_ATTESTATION_SIGNING_REQUEST: &str = "launcher_attestation_signing_request";
 pub const LAUNCHER_ATTESTATION_SIGNING_RESPONSE: &str = "launcher_attestation_signing_response";
@@ -136,6 +207,89 @@ pub const LAUNCHER_CHILD_PROCESS_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.child-process.v1\0";
 pub const LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.systemd-scope.v1\0";
+pub const PROTECTED_LAUNCHER_DESCRIPTOR_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-descriptor.v1\0";
+pub const PROTECTED_LAUNCHER_STORE_CONTENT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-store-content.v1\0";
+pub const PROTECTED_LAUNCHER_CGROUP_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-cgroup.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.protected-capability.v1\0";
+pub const RUNNER_ADMINISTRATOR_AUTHORITY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.runner-administrator-authority.v1\0";
+pub const PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.implementation-subject.v1\0";
+pub const PROTECTED_LAUNCHER_AUTHORITY_CONTEXT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.authority-context.v1\0";
+pub const PROTECTED_LAUNCHER_INVOCATION_NONCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.authority-launcher.invocation-nonce.v1\0";
+pub const PROTECTED_LAUNCHER_BOOT_IDENTITY_DOMAIN_V1: &[u8] = b"ota.authority-launcher.boot.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_NONCE_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-nonce.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-challenge.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-projection.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-request.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-probe-request.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-signing-request.v1\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V1:
+    &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v1\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-secret-delivery-transaction-binding.v1\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_SESSION_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-secret-delivery-transaction-session.v1\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_NONCE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-authority-snapshot-nonce.v1\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_CHALLENGE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-authority-snapshot-challenge.v1\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-authority-snapshot-request.v1\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-authority-snapshot.v1\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-authority-snapshot-response.v1\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.protected-authority-snapshot-request.v2\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.protected-authority-snapshot.v2\0";
+pub const PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.protected-authority-snapshot-response.v2\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V2:
+    &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v2\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V2: &[u8] =
+    b"ota.protected-launcher-secret-delivery-transaction-binding.v2\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V3:
+    &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v3\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V3: &[u8] =
+    b"ota.protected-launcher-secret-delivery-transaction-binding.v3\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V4:
+    &[u8] = b"ota.protected-launcher-secret-delivery-transaction-binding-request.v4\0";
+pub const PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V4: &[u8] =
+    b"ota.protected-launcher-secret-delivery-transaction-binding.v4\0";
+pub const PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-same-child-capability-prelude.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-observation-signature.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-projection-verifier.v1\0";
+pub const PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_KEY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-launcher-capability-projection-key.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_VERIFIER_STORE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.verifier-store.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-verifier.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-payload.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_IDENTITY_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-key.v1\0";
+pub const PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1: &[u8] =
+    b"ota.protected-secret-delivery.binding-bundle-signature.v1\0";
 pub const LAUNCHER_STARTUP_CONTINUATION_IDENTITY_DOMAIN_V1: &[u8] =
     b"ota.authority-launcher.startup-continuation.v1\0";
 pub const AUTHORIZATION_DECISION_ADMISSION_IDENTITY_DOMAIN_V1: &[u8] =
@@ -290,6 +444,9 @@ pub struct LauncherStartupContinuationV1 {
     pub identity: String,
     pub message_kind: String,
     pub invocation_id: String,
+    /// Exact identity of the Launcher-owned request. The selected Ota child receives this
+    /// identity, not reconstructible request content, through its inherited session.
+    pub launcher_request_identity: String,
     pub child_process_identity: String,
     pub working_directory_identity: String,
     pub process_posture_identity: String,
@@ -313,6 +470,698 @@ pub struct LauncherSystemdScopeV1 {
     pub delegate: bool,
     pub kill_mode: String,
     pub collect_mode: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedLauncherDescriptorRoleV1 {
+    LauncherSessionSocket,
+    VerifierStore,
+    BindingStore,
+    InvocationCgroup,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedLauncherDescriptorKindV1 {
+    UnixStreamSocket,
+    RegularFile,
+    Directory,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedLauncherDescriptorAccessV1 {
+    ReadOnly,
+    ReadWrite,
+}
+
+/// Metadata for one descriptor retained across the protected launcher boundary.
+///
+/// This record carries no path or file content. The launcher and Core independently reconcile
+/// the live descriptor and exact bytes where the role requires them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherDescriptorV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub role: ProtectedLauncherDescriptorRoleV1,
+    pub kind: ProtectedLauncherDescriptorKindV1,
+    pub access: ProtectedLauncherDescriptorAccessV1,
+    pub device: u64,
+    pub inode: u64,
+    pub owner_uid: u32,
+    pub owner_gid: u32,
+    pub mode: u32,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_identity: Option<String>,
+}
+
+/// Protected-launcher facts retained for one exact unprivileged Ota invocation.
+///
+/// This is capability evidence, not crossing authority, provider authority, or a bearer-token
+/// carrier. Token and provider response bytes must never enter this record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityV1 {
+    pub schema_version: u32,
+    pub identity: String,
+    pub message_kind: String,
+    pub protocol_version: String,
+    pub launcher_request_identity: String,
+    pub launcher_executable_identity: String,
+    pub launcher_configuration_identity: String,
+    pub launcher_service_binding_identity: String,
+    pub launcher_profile_identity: String,
+    pub runner_administrator_identity: String,
+    pub service_uid: u32,
+    pub service_gid: u32,
+    pub invocation_nonce_identity: String,
+    pub boot_identity: String,
+    pub protected_launcher_instance_identity: String,
+    pub systemd_invocation_identity: String,
+    pub systemd_scope_identity: String,
+    pub cgroup_identity: String,
+    pub child_process_identity: String,
+    pub principal_mapping_identity: String,
+    pub process_posture_identity: String,
+    pub implementation_subject_identity: String,
+    pub descriptors: Vec<ProtectedLauncherDescriptorV1>,
+}
+
+/// Stable identity of the independently administered protected-runner authority.
+///
+/// Installation and ownership evidence establish who controls this record. This record only
+/// defines its canonical semantic identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerAdministratorAuthorityV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub authority_id: String,
+    pub authority_instance_id: String,
+    pub administration_scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherImplementationTargetV1 {
+    pub environment: String,
+    pub os: String,
+    pub architecture: String,
+    pub execution_mode: String,
+    pub launcher_class: String,
+}
+
+/// Exact installed Launcher and Ota implementation subject for the first protected-runner target.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherImplementationSubjectV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub launcher_source_repository: String,
+    pub launcher_source_revision: String,
+    pub core_source_repository: String,
+    pub core_source_revision: String,
+    pub protocol_source_repository: String,
+    pub protocol_source_revision: String,
+    pub launcher_build_identity: String,
+    pub core_build_identity: String,
+    pub launcher_artifact_identity: String,
+    pub ota_artifact_identity: String,
+    pub protocol_version: String,
+    pub minimum_core_version: String,
+    pub maximum_exclusive_core_version: String,
+    pub launcher_profile_identity: String,
+    pub target: ProtectedLauncherImplementationTargetV1,
+}
+
+/// Administrator-installed static context required before live capability derivation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherAuthorityContextV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub runner_administrator: RunnerAdministratorAuthorityV1,
+    pub implementation_subject: ProtectedLauncherImplementationSubjectV1,
+}
+
+/// Independently observed records used to reconcile a protected capability.
+///
+/// This is an in-process verification input, not a serialized wire message. The protected store
+/// bytes are consumed only to rederive their role-specific identities.
+#[derive(Clone, Copy)]
+pub struct ProtectedLauncherCapabilityEvidenceV1<'a> {
+    pub request: &'a LauncherInvocationRequestV1,
+    pub child: &'a LauncherChildProcessV1,
+    pub scope: &'a LauncherSystemdScopeV1,
+    pub principal_mapping: &'a LauncherPrincipalMappingV1,
+    pub process_posture: &'a OtaProcessPostureV1,
+    pub launcher_instance: &'a SystemdProtectedLauncherInstanceEvidenceV2,
+    pub launcher_executable_identity: &'a str,
+    pub launcher_configuration_identity: &'a str,
+    pub launcher_service_binding_identity: &'a str,
+    pub launcher_profile_identity: &'a str,
+    pub runner_administrator_identity: &'a str,
+    pub service_uid: u32,
+    pub service_gid: u32,
+    pub invocation_nonce_identity: &'a str,
+    pub boot_identity: &'a str,
+    pub implementation_subject_identity: &'a str,
+    pub observed_descriptors: &'a [ProtectedLauncherDescriptorV1],
+    pub verifier_store_bytes: &'a [u8],
+    pub binding_store_bytes: &'a [u8],
+}
+
+/// One fresh Core-owned public challenge for a protected capability observation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationChallengeV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub workflow_run_id: String,
+    pub workflow_run_attempt: String,
+    pub workflow_reference: String,
+    pub nonce_commitment: String,
+    pub issued_at_unix_seconds: u64,
+    pub expires_at_unix_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationTargetV1 {
+    pub environment: String,
+    pub os: String,
+    pub architecture: String,
+}
+
+/// Exact unsigned public payload derived by the root-owned launcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationProjectionPayloadV1 {
+    pub schema_version: u32,
+    pub evidence_kind: String,
+    pub challenge_identity: String,
+    pub derivation: String,
+    pub target: ProtectedLauncherCapabilityObservationTargetV1,
+    pub capability_class: String,
+    pub runner_version: String,
+    pub signing_key_identity: String,
+}
+
+/// Public signed envelope. The protected capability identity never enters this record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationProjectionV1 {
+    pub payload: ProtectedLauncherCapabilityObservationProjectionPayloadV1,
+    pub projection_identity: String,
+    pub signature: String,
+}
+
+/// Fixed local request carrying Core's fresh challenge to the protected launcher.
+///
+/// `nonce` is confidential local transport input. It is never a public projection field.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub challenge: ProtectedLauncherCapabilityObservationChallengeV1,
+    pub nonce: String,
+    pub runner_version: String,
+    /// Protected identity of the exact Launcher invocation Core expects to observe.
+    /// This remains local transport input and is never projected publicly.
+    pub expected_launcher_request_identity: String,
+}
+
+/// One closed local request that binds an accepted Launcher invocation to Core's fresh
+/// capability-observation request. Neither record is public projection material.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationProbeRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub invocation: LauncherInvocationRequestV1,
+    pub observation: ProtectedLauncherCapabilityObservationRequestV1,
+}
+
+/// Fixed local response carrying only the bounded public projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// Closed private carrier retained over the selected child's inherited session after one
+/// capability observation. It never enters public output, artifacts, receipts, or archives.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSameChildCapabilityPreludeV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub observation_request_identity: String,
+    pub projection_identity: String,
+    pub protected_capability_identity: String,
+    pub verifier_identity: String,
+    pub installation_evidence_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub expires_at_unix_seconds: u64,
+}
+
+/// Protected Launcher-to-Attestor request for one exact capability-observation signature.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationSigningRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub producer_binding_identity: String,
+    pub verifier_identity: String,
+    pub protected_capability_identity: String,
+    pub payload: ProtectedLauncherCapabilityObservationProjectionPayloadV1,
+    pub projection_identity: String,
+}
+
+/// Protected Attestor response containing only the signed public projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityObservationSigningResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// Core-to-Launcher protected request for a same-execution secret-delivery binding.
+///
+/// `secret_transaction_candidate_identity` is opaque Core-derived transport truth. The Launcher
+/// binds it to the selected child but never treats it as authority.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    /// Launcher-owned request identity retained from the startup continuation.
+    pub launcher_request_identity: String,
+    pub observation: ProtectedLauncherCapabilityObservationRequestV1,
+    pub secret_transaction_candidate_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+}
+
+/// Closed private record derived by Launcher for the exact selected-child boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub protected_capability_identity: String,
+    pub secret_transaction_candidate_identity: String,
+    pub observation_request_identity: String,
+    pub projection_identity: String,
+    pub verifier_identity: String,
+    pub installation_evidence_identity: String,
+    pub expires_at_unix_seconds: u64,
+}
+
+/// Fixed local response carrying the private same-execution binding and its signed public
+/// capability-observation projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub binding: ProtectedLauncherSecretDeliveryTransactionBindingV1,
+    /// Signed public projection that Core can verify from its independently loaded verifier.
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// Core-owned freshness challenge for one private protected-authority snapshot exchange.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotChallengeV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub nonce_commitment: String,
+    pub issued_at_unix_seconds: u64,
+    pub expires_at_unix_seconds: u64,
+}
+
+/// Closed Core-to-Launcher request for exactly one selected-child authority snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotRequestV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub challenge: ProtectedAuthoritySnapshotChallengeV1,
+    /// Private, canonical unpadded base64url 32-byte value. It never leaves this request.
+    pub nonce: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub contract_identity: String,
+    pub selected_execution_graph_identity: String,
+}
+
+/// Closed unsigned protected snapshot. The byte strings are private transport input, not public
+/// evidence or filesystem authority for Core.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotPayloadV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub contract_identity: String,
+    pub selected_execution_graph_identity: String,
+    pub verifier_store_descriptor: ProtectedLauncherDescriptorV1,
+    pub binding_store_descriptor: ProtectedLauncherDescriptorV1,
+    pub verifier_store: ProtectedSecretDeliveryVerifierStoreV1,
+    pub binding_bundle: ProtectedSecretDeliveryBindingBundleV1,
+    pub verifier_store_bytes: String,
+    pub binding_store_bytes: String,
+}
+
+/// Launcher response carrying one private, transitive authority snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotResponseV1 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub payload: ProtectedAuthoritySnapshotPayloadV1,
+    pub protected_snapshot_identity: String,
+}
+
+/// Additive Core-to-Launcher request for a bounded authority snapshot without duplicate stores.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotRequestV2 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub challenge: ProtectedAuthoritySnapshotChallengeV1,
+    /// Private, canonical unpadded base64url 32-byte value. It never leaves this request.
+    pub nonce: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub contract_identity: String,
+    pub selected_execution_graph_identity: String,
+}
+
+/// Closed unsigned snapshot with raw descriptor-bound stores represented exactly once.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotPayloadV2 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub contract_identity: String,
+    pub selected_execution_graph_identity: String,
+    pub verifier_store_descriptor: ProtectedLauncherDescriptorV1,
+    pub binding_store_descriptor: ProtectedLauncherDescriptorV1,
+    pub verifier_store_bytes: String,
+    pub binding_store_bytes: String,
+}
+
+/// Additive Launcher response carrying one private V2 authority snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedAuthoritySnapshotResponseV2 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub payload: ProtectedAuthoritySnapshotPayloadV2,
+    pub protected_snapshot_identity: String,
+}
+
+/// Additive binding request. V1 records are immutable and cannot select a protected snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingRequestV2 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub launcher_request_identity: String,
+    pub observation: ProtectedLauncherCapabilityObservationRequestV1,
+    pub secret_transaction_candidate_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+}
+
+/// Additive private binding that carries the retained authority snapshot identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingV2 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub protected_capability_identity: String,
+    pub secret_transaction_candidate_identity: String,
+    pub observation_request_identity: String,
+    pub projection_identity: String,
+    pub verifier_identity: String,
+    pub installation_evidence_identity: String,
+    pub expires_at_unix_seconds: u64,
+}
+
+/// Fixed local response for the additive snapshot-bound transaction binding.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingResponseV2 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub binding: ProtectedLauncherSecretDeliveryTransactionBindingV2,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// Additive transport-provenance binding request. V2 remains immutable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingRequestV3 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub launcher_request_identity: String,
+    pub observation: ProtectedLauncherCapabilityObservationRequestV1,
+    pub secret_transaction_candidate_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub transport_dependency_record_identity: String,
+}
+
+/// Additive private binding that carries exact transport build provenance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingV3 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub protected_capability_identity: String,
+    pub secret_transaction_candidate_identity: String,
+    pub observation_request_identity: String,
+    pub projection_identity: String,
+    pub verifier_identity: String,
+    pub installation_evidence_identity: String,
+    pub expires_at_unix_seconds: u64,
+    pub transport_dependency_record_identity: String,
+}
+
+/// Fixed local response for the additive transport-provenance transaction binding.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingResponseV3 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub binding: ProtectedLauncherSecretDeliveryTransactionBindingV3,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// V4 binds the additive V2 snapshot without changing V3's historical V1 snapshot semantics.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingRequestV4 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub launcher_request_identity: String,
+    pub observation: ProtectedLauncherCapabilityObservationRequestV1,
+    pub secret_transaction_candidate_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub protected_snapshot_schema_version: u32,
+    pub protected_snapshot_record_kind: String,
+    pub transport_dependency_record_identity: String,
+}
+
+/// Private V4 binding for one exact V2 snapshot and transport dependency record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingV4 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub identity: String,
+    pub request_identity: String,
+    pub launcher_request_identity: String,
+    pub startup_continuation_identity: String,
+    pub session_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub protected_snapshot_schema_version: u32,
+    pub protected_snapshot_record_kind: String,
+    pub protected_capability_identity: String,
+    pub secret_transaction_candidate_identity: String,
+    pub observation_request_identity: String,
+    pub projection_identity: String,
+    pub verifier_identity: String,
+    pub installation_evidence_identity: String,
+    pub expires_at_unix_seconds: u64,
+    pub transport_dependency_record_identity: String,
+}
+
+/// Closed V4 response retaining the same snapshot discriminator as its request and binding.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingResponseV4 {
+    pub schema_version: u32,
+    pub message_kind: String,
+    pub request_identity: String,
+    pub same_child_capability_prelude_identity: String,
+    pub protected_snapshot_identity: String,
+    pub protected_snapshot_schema_version: u32,
+    pub protected_snapshot_record_kind: String,
+    pub binding: ProtectedLauncherSecretDeliveryTransactionBindingV4,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+}
+
+/// Launcher-owned companion evidence that must already have passed its owning-layer verification.
+///
+/// Protocol reconciles these exact identities to the same-execution binding but does not replace
+/// descriptor provenance, signature verification, or installation authority verification.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1 {
+    pub protected_capability: ProtectedLauncherCapabilityV1,
+    pub projection: ProtectedLauncherCapabilityObservationProjectionV1,
+    pub verifier: ProtectedLauncherCapabilityProjectionVerifierV1,
+    pub installation_evidence_identity: String,
+}
+
+/// Administrator-installed public verifier for exactly one projection protocol.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedLauncherCapabilityProjectionVerifierV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub public_key: String,
+    pub key_identity: String,
+    pub key_usage: String,
+    pub signature_domain: String,
+}
+
+/// Administrator-controlled verifier store that admits exactly one current secret-delivery
+/// binding bundle. The independent administrator owns installation, Launcher owns retained
+/// descriptor loading and signature verification, and Core owns semantic binding parsing.
+/// Protocol owns only this closed record's structural and semantic reconciliation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSecretDeliveryVerifierStoreV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub authority_id: String,
+    pub generation: u64,
+    pub not_before_unix_seconds: u64,
+    pub not_after_unix_seconds: u64,
+    pub verifiers: Vec<ProtectedSecretDeliveryBindingBundleVerifierV1>,
+    pub active_binding_bundle_identity: String,
+    pub active_binding_bundle_generation: u64,
+}
+
+/// One admitted verifier whose key is restricted to binding-bundle signatures.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSecretDeliveryBindingBundleVerifierV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub public_key: String,
+    pub key_identity: String,
+    pub key_usage: String,
+    pub signature_domain: String,
+}
+
+/// Signed, opaque authority payload. The payload remains exact protected bytes until Core's
+/// later owner-specific parser rederives provider binding and profile semantics.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProtectedSecretDeliveryBindingBundleV1 {
+    pub schema_version: u32,
+    pub record_kind: String,
+    pub identity: String,
+    pub authority_id: String,
+    pub generation: u64,
+    pub issued_at_unix_seconds: u64,
+    pub expires_at_unix_seconds: u64,
+    pub verifier_identity: String,
+    pub payload: String,
+    pub payload_identity: String,
+    pub signature: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1167,7 +2016,7 @@ pub struct SystemdProtectedLauncherInstanceEvidenceV1 {
 }
 
 /// Complete systemd protected-launcher evidence. Schema 2 preserves the legacy V1/V2 profile
-/// branch; schema 3 exclusively carries the V3 launcher and V2 job-principal profiles.
+/// branch; schema 3 carries the current V3/V4 launcher and V2 job-principal profiles.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SystemdProtectedLauncherInstanceEvidenceV2 {
@@ -1547,6 +2396,7 @@ pub fn launcher_startup_continuation_identity(
             continuation.invocation_id.as_str(),
             MAX_LAUNCHER_INVOCATION_ID_BYTES_V1,
         )
+        || !is_sha256_identity(&continuation.launcher_request_identity)
         || !is_sha256_identity(&continuation.child_process_identity)
         || !is_sha256_identity(&continuation.working_directory_identity)
         || !is_sha256_identity(&continuation.process_posture_identity)
@@ -1776,7 +2626,7 @@ pub fn launcher_systemd_scope_identity(
         || !scope.unit_name.ends_with(".scope")
         || !is_absolute_bounded_path(scope.unit_object_path.as_str(), 1024)
         || scope.slice != "ota-authority-invocations.slice"
-        || !is_absolute_bounded_path(scope.control_group.as_str(), 1024)
+        || !is_canonical_absolute_bounded_path(scope.control_group.as_str(), 1024)
         || scope.delegate
         || scope.kill_mode != "control-group"
         || scope.collect_mode != "inactive-or-failed"
@@ -1786,6 +2636,2177 @@ pub fn launcher_systemd_scope_identity(
     let mut canonical = scope.clone();
     canonical.identity.clear();
     message_identity(LAUNCHER_SYSTEMD_SCOPE_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn protected_launcher_descriptor_v1_identity(
+    descriptor: &ProtectedLauncherDescriptorV1,
+) -> Result<String, ProtocolError> {
+    let role_shape_valid = match descriptor.role {
+        ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket => {
+            descriptor.kind == ProtectedLauncherDescriptorKindV1::UnixStreamSocket
+                && descriptor.access == ProtectedLauncherDescriptorAccessV1::ReadWrite
+        }
+        ProtectedLauncherDescriptorRoleV1::VerifierStore
+        | ProtectedLauncherDescriptorRoleV1::BindingStore => {
+            descriptor.kind == ProtectedLauncherDescriptorKindV1::RegularFile
+                && descriptor.access == ProtectedLauncherDescriptorAccessV1::ReadOnly
+                && descriptor.owner_uid == 0
+                && descriptor.owner_gid == 0
+                && descriptor.mode == 0o400
+                && descriptor
+                    .content_identity
+                    .as_deref()
+                    .is_some_and(is_sha256_identity)
+        }
+        ProtectedLauncherDescriptorRoleV1::InvocationCgroup => {
+            descriptor.kind == ProtectedLauncherDescriptorKindV1::Directory
+                && descriptor.access == ProtectedLauncherDescriptorAccessV1::ReadOnly
+                && descriptor.owner_uid == 0
+                && descriptor.owner_gid == 0
+                && descriptor.mode & 0o022 == 0
+        }
+    };
+    if descriptor.schema_version != 1
+        || descriptor.inode == 0
+        || descriptor.mode > 0o7777
+        || matches!(
+            descriptor.role,
+            ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket
+                | ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+        ) && descriptor.content_identity.is_some()
+        || !role_shape_valid
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = descriptor.clone();
+    canonical.identity.clear();
+    message_identity(PROTECTED_LAUNCHER_DESCRIPTOR_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+#[derive(Serialize)]
+struct ProtectedLauncherStoreContentIdentityInputV1<'a> {
+    role: ProtectedLauncherDescriptorRoleV1,
+    bytes: &'a [u8],
+}
+
+pub fn protected_launcher_store_content_identity_v1(
+    role: ProtectedLauncherDescriptorRoleV1,
+    bytes: &[u8],
+) -> Result<String, ProtocolError> {
+    if !matches!(
+        role,
+        ProtectedLauncherDescriptorRoleV1::VerifierStore
+            | ProtectedLauncherDescriptorRoleV1::BindingStore
+    ) || bytes.is_empty()
+        || bytes.len() > MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_STORE_CONTENT_IDENTITY_DOMAIN_V1,
+        &ProtectedLauncherStoreContentIdentityInputV1 { role, bytes },
+    )
+}
+
+#[derive(Serialize)]
+struct ProtectedLauncherCgroupIdentityInputV1<'a> {
+    scope_identity: &'a str,
+    control_group: &'a str,
+    descriptor_identity: &'a str,
+}
+
+pub fn protected_launcher_cgroup_v1_identity(
+    scope: &LauncherSystemdScopeV1,
+    descriptor: &ProtectedLauncherDescriptorV1,
+) -> Result<String, ProtocolError> {
+    if launcher_systemd_scope_identity(scope)? != scope.identity
+        || descriptor.role != ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+        || protected_launcher_descriptor_v1_identity(descriptor)? != descriptor.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_CGROUP_IDENTITY_DOMAIN_V1,
+        &ProtectedLauncherCgroupIdentityInputV1 {
+            scope_identity: scope.identity.as_str(),
+            control_group: scope.control_group.as_str(),
+            descriptor_identity: descriptor.identity.as_str(),
+        },
+    )
+}
+
+pub fn runner_administrator_authority_v1_identity(
+    authority: &RunnerAdministratorAuthorityV1,
+) -> Result<String, ProtocolError> {
+    if authority.schema_version != 1
+        || authority.record_kind != RUNNER_ADMINISTRATOR_AUTHORITY
+        || !is_canonical_lowercase_label(
+            &authority.authority_id,
+            MAX_LAUNCHER_AUTHORITY_ID_BYTES_V1,
+        )
+        || !is_canonical_nonzero_base64url_32_bytes(&authority.authority_instance_id)
+        || authority.administration_scope != "protected_self_hosted_runner"
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = authority.clone();
+    canonical.identity.clear();
+    message_identity(
+        RUNNER_ADMINISTRATOR_AUTHORITY_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_implementation_subject_v1_identity(
+    subject: &ProtectedLauncherImplementationSubjectV1,
+) -> Result<String, ProtocolError> {
+    let minimum_core =
+        Version::parse(&subject.minimum_core_version).map_err(|_| ProtocolError::InvalidRecord)?;
+    let maximum_core = Version::parse(&subject.maximum_exclusive_core_version)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if subject.schema_version != 1
+        || subject.record_kind != PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT
+        || subject.launcher_source_repository != "https://github.com/ota-run/authority-launcher"
+        || subject.core_source_repository != "https://github.com/ota-run/ota"
+        || subject.protocol_source_repository != "https://github.com/ota-run/authority-protocol"
+        || !is_canonical_git_revision(&subject.launcher_source_revision)
+        || !is_canonical_git_revision(&subject.core_source_revision)
+        || !is_canonical_git_revision(&subject.protocol_source_revision)
+        || !is_sha256_identity(&subject.launcher_build_identity)
+        || !is_sha256_identity(&subject.core_build_identity)
+        || !is_sha256_identity(&subject.launcher_artifact_identity)
+        || !is_sha256_identity(&subject.ota_artifact_identity)
+        || subject.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || !is_canonical_semver(&subject.minimum_core_version)
+        || !is_canonical_semver(&subject.maximum_exclusive_core_version)
+        || minimum_core >= maximum_core
+        || !is_sha256_identity(&subject.launcher_profile_identity)
+        || subject.target.environment != "self_hosted"
+        || subject.target.os != "linux"
+        || subject.target.architecture != "x86_64"
+        || subject.target.execution_mode != "native"
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let expected_profile = match subject.target.launcher_class.as_str() {
+        "systemd_protected_launcher_v3" => systemd_launcher_profile_v3(),
+        "systemd_protected_launcher_v4" => systemd_launcher_profile_v4(),
+        _ => return Err(ProtocolError::InvalidRecord),
+    };
+    if subject.launcher_profile_identity != systemd_launcher_profile_identity(&expected_profile)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = subject.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_authority_context_v1_identity(
+    context: &ProtectedLauncherAuthorityContextV1,
+) -> Result<String, ProtocolError> {
+    if context.schema_version != 1
+        || context.record_kind != PROTECTED_LAUNCHER_AUTHORITY_CONTEXT
+        || runner_administrator_authority_v1_identity(&context.runner_administrator)?
+            != context.runner_administrator.identity
+        || protected_launcher_implementation_subject_v1_identity(&context.implementation_subject)?
+            != context.implementation_subject.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = context.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_AUTHORITY_CONTEXT_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_invocation_nonce_v1_identity(
+    nonce: &[u8],
+) -> Result<String, ProtocolError> {
+    if nonce.len() != 32 {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_LAUNCHER_INVOCATION_NONCE_IDENTITY_DOMAIN_V1,
+        nonce,
+    )))
+}
+
+pub fn protected_launcher_boot_v1_identity(boot_id: &str) -> Result<String, ProtocolError> {
+    if !is_canonical_lowercase_uuid(boot_id) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_LAUNCHER_BOOT_IDENTITY_DOMAIN_V1,
+        boot_id.as_bytes(),
+    )))
+}
+
+pub fn protected_launcher_capability_v1_identity(
+    capability: &ProtectedLauncherCapabilityV1,
+) -> Result<String, ProtocolError> {
+    const REQUIRED_ROLES: [ProtectedLauncherDescriptorRoleV1; 4] = [
+        ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket,
+        ProtectedLauncherDescriptorRoleV1::VerifierStore,
+        ProtectedLauncherDescriptorRoleV1::BindingStore,
+        ProtectedLauncherDescriptorRoleV1::InvocationCgroup,
+    ];
+
+    if capability.schema_version != 1
+        || capability.message_kind != PROTECTED_LAUNCHER_CAPABILITY
+        || capability.protocol_version != SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1
+        || capability.service_uid != 0
+        || capability.service_gid != 0
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+
+    for identity in [
+        capability.launcher_request_identity.as_str(),
+        capability.launcher_executable_identity.as_str(),
+        capability.launcher_configuration_identity.as_str(),
+        capability.launcher_service_binding_identity.as_str(),
+        capability.launcher_profile_identity.as_str(),
+        capability.runner_administrator_identity.as_str(),
+        capability.invocation_nonce_identity.as_str(),
+        capability.boot_identity.as_str(),
+        capability.protected_launcher_instance_identity.as_str(),
+        capability.systemd_invocation_identity.as_str(),
+        capability.systemd_scope_identity.as_str(),
+        capability.cgroup_identity.as_str(),
+        capability.child_process_identity.as_str(),
+        capability.principal_mapping_identity.as_str(),
+        capability.process_posture_identity.as_str(),
+        capability.implementation_subject_identity.as_str(),
+    ] {
+        if !is_sha256_identity(identity) {
+            return Err(ProtocolError::InvalidRecord);
+        }
+    }
+
+    if capability.descriptors.len() != REQUIRED_ROLES.len() {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut descriptors = capability.descriptors.clone();
+    descriptors.sort_by_key(|descriptor| descriptor.role);
+    if descriptors
+        .iter()
+        .zip(REQUIRED_ROLES)
+        .any(|(descriptor, required_role)| {
+            descriptor.role != required_role
+                || protected_launcher_descriptor_v1_identity(descriptor).as_deref()
+                    != Ok(descriptor.identity.as_str())
+        })
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    if descriptors.iter().enumerate().any(|(index, descriptor)| {
+        descriptors[..index].iter().any(|previous| {
+            previous.device == descriptor.device && previous.inode == descriptor.inode
+        })
+    }) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+
+    let mut canonical = capability.clone();
+    canonical.identity.clear();
+    canonical.descriptors = descriptors;
+    message_identity(PROTECTED_LAUNCHER_CAPABILITY_IDENTITY_DOMAIN_V1, &canonical)
+}
+
+pub fn protected_launcher_capability_observation_nonce_commitment_v1(
+    nonce: &[u8],
+) -> Result<String, ProtocolError> {
+    if nonce.len() != 32 {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_NONCE_DOMAIN_V1,
+        nonce,
+    )))
+}
+
+pub fn protected_launcher_capability_observation_challenge_v1_identity(
+    challenge: &ProtectedLauncherCapabilityObservationChallengeV1,
+) -> Result<String, ProtocolError> {
+    if challenge.schema_version != 1
+        || challenge.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE
+        || !is_canonical_positive_decimal(&challenge.workflow_run_id)
+        || !is_canonical_positive_decimal(&challenge.workflow_run_attempt)
+        || !is_canonical_workflow_reference(&challenge.workflow_reference)
+        || !is_sha256_identity(&challenge.nonce_commitment)
+        || challenge.issued_at_unix_seconds == 0
+        || challenge.expires_at_unix_seconds <= challenge.issued_at_unix_seconds
+        || challenge.expires_at_unix_seconds - challenge.issued_at_unix_seconds > 300
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = challenge.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_observation_challenge_v1(
+    challenge: &ProtectedLauncherCapabilityObservationChallengeV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if challenge.identity
+        != protected_launcher_capability_observation_challenge_v1_identity(challenge)?
+        || observed_at_unix_seconds < challenge.issued_at_unix_seconds
+        || observed_at_unix_seconds > challenge.expires_at_unix_seconds
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_capability_observation_request_v1_identity(
+    request: &ProtectedLauncherCapabilityObservationRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST
+        || !is_canonical_base64url_32_bytes(&request.nonce)
+        || !is_canonical_semver(&request.runner_version)
+        || !is_sha256_identity(&request.expected_launcher_request_identity)
+        || protected_launcher_capability_observation_challenge_v1_identity(&request.challenge)?
+            != request.challenge.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let nonce = URL_SAFE_NO_PAD
+        .decode(&request.nonce)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if protected_launcher_capability_observation_nonce_commitment_v1(&nonce)?
+        != request.challenge.nonce_commitment
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn protected_launcher_capability_observation_probe_request_v1_identity(
+    request: &ProtectedLauncherCapabilityObservationProbeRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST
+        || request.observation.identity
+            != protected_launcher_capability_observation_request_v1_identity(&request.observation)?
+        || request.observation.expected_launcher_request_identity
+            != launcher_invocation_request_identity(&request.invocation)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_observation_response_v1(
+    response: &ProtectedLauncherCapabilityObservationResponseV1,
+) -> Result<(), ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+        || response.projection.payload.challenge_identity.is_empty()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+}
+
+pub fn protected_same_child_capability_prelude_v1_identity(
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+) -> Result<String, ProtocolError> {
+    if prelude.schema_version != 1
+        || prelude.record_kind != PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE
+        || prelude.expires_at_unix_seconds == 0
+        || [
+            &prelude.observation_request_identity,
+            &prelude.projection_identity,
+            &prelude.protected_capability_identity,
+            &prelude.verifier_identity,
+            &prelude.installation_evidence_identity,
+            &prelude.launcher_request_identity,
+            &prelude.startup_continuation_identity,
+            &prelude.session_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || prelude.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                prelude.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = prelude.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_same_child_capability_prelude_v1(
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+) -> Result<(), ProtocolError> {
+    if prelude.identity != protected_same_child_capability_prelude_v1_identity(prelude)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_request_v1_identity(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST
+        || request.observation.identity
+            != protected_launcher_capability_observation_request_v1_identity(&request.observation)?
+        || !is_sha256_identity(&request.launcher_request_identity)
+        || request.observation.expected_launcher_request_identity
+            != request.launcher_request_identity
+        || !is_sha256_identity(&request.secret_transaction_candidate_identity)
+        || !is_sha256_identity(&request.startup_continuation_identity)
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+/// Derives the private session handle from the exact startup continuation that binds both ends of
+/// the inherited Unix stream. Callers cannot choose an unrelated opaque session identity.
+pub fn protected_launcher_secret_delivery_transaction_session_v1_identity(
+    startup_continuation_identity: &str,
+) -> Result<String, ProtocolError> {
+    if !is_sha256_identity(startup_continuation_identity) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_SESSION_IDENTITY_DOMAIN_V1,
+        &startup_continuation_identity,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_request_v1(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+) -> Result<(), ProtocolError> {
+    if request.identity
+        != protected_launcher_secret_delivery_transaction_binding_request_v1_identity(request)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles a binding request to the exact retained startup continuation before any protected
+/// capability derivation, signing, or replay-state mutation occurs.
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+) -> Result<(), ProtocolError> {
+    validate_protected_launcher_secret_delivery_transaction_binding_request_v1(request)?;
+    if startup_continuation.identity
+        != launcher_startup_continuation_identity(startup_continuation)?
+        || request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_v1_identity(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV1,
+) -> Result<String, ProtocolError> {
+    if binding.schema_version != 1
+        || binding.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING
+        || binding.expires_at_unix_seconds == 0
+        || [
+            &binding.request_identity,
+            &binding.launcher_request_identity,
+            &binding.startup_continuation_identity,
+            &binding.session_identity,
+            &binding.protected_capability_identity,
+            &binding.secret_transaction_candidate_identity,
+            &binding.observation_request_identity,
+            &binding.projection_identity,
+            &binding.verifier_identity,
+            &binding.installation_evidence_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = binding.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_v1(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV1,
+) -> Result<(), ProtocolError> {
+    if binding.identity
+        != protected_launcher_secret_delivery_transaction_binding_v1_identity(binding)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles the Core-visible response against the exact retained request and independently
+/// loaded verification authority. Cryptographic signature verification remains a Core owner.
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+    installation_evidence_identity: &str,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+        request,
+        startup_continuation,
+    )?;
+    validate_protected_launcher_capability_projection_verifier_v1(verifier)?;
+    if response.schema_version != 1
+        || response.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE
+        || response.request_identity != request.identity
+        || validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+            .is_err()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_secret_delivery_transaction_binding_v1(&response.binding)?;
+    let binding = &response.binding;
+    if binding.request_identity != request.identity
+        || binding.launcher_request_identity != request.launcher_request_identity
+        || binding.startup_continuation_identity != request.startup_continuation_identity
+        || binding.session_identity != request.session_identity
+        || binding.secret_transaction_candidate_identity
+            != request.secret_transaction_candidate_identity
+        || binding.observation_request_identity != request.observation.identity
+        || binding.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || binding.projection_identity != response.projection.projection_identity
+        || binding.verifier_identity != verifier.identity
+        || response.projection.payload.signing_key_identity != verifier.key_identity
+        || response.projection.payload.challenge_identity != request.observation.challenge.identity
+        || response.projection.payload.runner_version != request.observation.runner_version
+        || binding.installation_evidence_identity != installation_evidence_identity
+        || !is_sha256_identity(installation_evidence_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles Launcher-private capability evidence before a response crosses to Core.
+///
+/// Descriptor provenance, projection signature verification, and installation authority remain
+/// with their owning layers; this function binds their already-verified identities together.
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
+        request,
+        response,
+        startup_continuation,
+        &evidence.verifier,
+        &evidence.installation_evidence_identity,
+    )?;
+    let binding = &response.binding;
+    if protected_launcher_capability_v1_identity(&evidence.protected_capability)?
+        != evidence.protected_capability.identity
+        || binding.protected_capability_identity != evidence.protected_capability.identity
+        || response.projection != evidence.projection
+        || evidence.protected_capability.launcher_request_identity
+            != request.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_authority_snapshot_nonce_commitment_v1(
+    nonce: &[u8],
+) -> Result<String, ProtocolError> {
+    if nonce.len() != 32 {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_AUTHORITY_SNAPSHOT_NONCE_IDENTITY_DOMAIN_V1,
+        nonce,
+    )))
+}
+
+pub fn protected_authority_snapshot_challenge_v1_identity(
+    challenge: &ProtectedAuthoritySnapshotChallengeV1,
+) -> Result<String, ProtocolError> {
+    if challenge.schema_version != 1
+        || challenge.message_kind != PROTECTED_AUTHORITY_SNAPSHOT_CHALLENGE
+        || !is_sha256_identity(&challenge.nonce_commitment)
+        || challenge.issued_at_unix_seconds == 0
+        || challenge.expires_at_unix_seconds <= challenge.issued_at_unix_seconds
+        || challenge.expires_at_unix_seconds - challenge.issued_at_unix_seconds > 300
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = challenge.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_AUTHORITY_SNAPSHOT_CHALLENGE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_authority_snapshot_challenge_v1(
+    challenge: &ProtectedAuthoritySnapshotChallengeV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if challenge.identity != protected_authority_snapshot_challenge_v1_identity(challenge)?
+        || observed_at_unix_seconds < challenge.issued_at_unix_seconds
+        || observed_at_unix_seconds > challenge.expires_at_unix_seconds
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_authority_snapshot_request_v1_identity(
+    request: &ProtectedAuthoritySnapshotRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_AUTHORITY_SNAPSHOT_REQUEST
+        || request.challenge.identity
+            != protected_authority_snapshot_challenge_v1_identity(&request.challenge)?
+        || !is_canonical_base64url_32_bytes(&request.nonce)
+        || [
+            &request.launcher_request_identity,
+            &request.startup_continuation_identity,
+            &request.contract_identity,
+            &request.selected_execution_graph_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let nonce = URL_SAFE_NO_PAD
+        .decode(&request.nonce)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if protected_authority_snapshot_nonce_commitment_v1(&nonce)?
+        != request.challenge.nonce_commitment
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_authority_snapshot_request_v1(
+    request: &ProtectedAuthoritySnapshotRequestV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if request.identity != protected_authority_snapshot_request_v1_identity(request)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_authority_snapshot_challenge_v1(&request.challenge, observed_at_unix_seconds)
+}
+
+pub fn reconcile_protected_authority_snapshot_request_v1(
+    request: &ProtectedAuthoritySnapshotRequestV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    validate_protected_authority_snapshot_request_v1(request, observed_at_unix_seconds)?;
+    if startup_continuation.identity
+        != launcher_startup_continuation_identity(startup_continuation)?
+        || request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+fn protected_authority_snapshot_store_bytes(value: &str) -> Result<Vec<u8>, ProtocolError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if bytes.is_empty()
+        || bytes.len() > MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1
+        || URL_SAFE_NO_PAD.encode(&bytes) != value
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(bytes)
+}
+
+pub fn protected_authority_snapshot_payload_v1_identity(
+    payload: &ProtectedAuthoritySnapshotPayloadV1,
+) -> Result<String, ProtocolError> {
+    if payload.schema_version != 1
+        || payload.record_kind != PROTECTED_AUTHORITY_SNAPSHOT
+        || [
+            &payload.request_identity,
+            &payload.launcher_request_identity,
+            &payload.startup_continuation_identity,
+            &payload.contract_identity,
+            &payload.selected_execution_graph_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || payload.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                payload.startup_continuation_identity.as_str(),
+            )?
+        || payload.verifier_store_descriptor.role
+            != ProtectedLauncherDescriptorRoleV1::VerifierStore
+        || payload.binding_store_descriptor.role != ProtectedLauncherDescriptorRoleV1::BindingStore
+        || protected_launcher_descriptor_v1_identity(&payload.verifier_store_descriptor)?
+            != payload.verifier_store_descriptor.identity
+        || protected_launcher_descriptor_v1_identity(&payload.binding_store_descriptor)?
+            != payload.binding_store_descriptor.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let verifier_bytes = protected_authority_snapshot_store_bytes(&payload.verifier_store_bytes)?;
+    let binding_bytes = protected_authority_snapshot_store_bytes(&payload.binding_store_bytes)?;
+    if payload.verifier_store_descriptor.size != verifier_bytes.len() as u64
+        || payload.binding_store_descriptor.size != binding_bytes.len() as u64
+        || (
+            payload.verifier_store_descriptor.device,
+            payload.verifier_store_descriptor.inode,
+        ) == (
+            payload.binding_store_descriptor.device,
+            payload.binding_store_descriptor.inode,
+        )
+        || payload
+            .verifier_store_descriptor
+            .content_identity
+            .as_deref()
+            != Some(
+                protected_launcher_store_content_identity_v1(
+                    ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                    &verifier_bytes,
+                )?
+                .as_str(),
+            )
+        || payload.binding_store_descriptor.content_identity.as_deref()
+            != Some(
+                protected_launcher_store_content_identity_v1(
+                    ProtectedLauncherDescriptorRoleV1::BindingStore,
+                    &binding_bytes,
+                )?
+                .as_str(),
+            )
+        || serde_json::from_slice::<ProtectedSecretDeliveryVerifierStoreV1>(&verifier_bytes)
+            .map_err(|_| ProtocolError::InvalidRecord)?
+            != payload.verifier_store
+        || serde_json::from_slice::<ProtectedSecretDeliveryBindingBundleV1>(&binding_bytes)
+            .map_err(|_| ProtocolError::InvalidRecord)?
+            != payload.binding_bundle
+        || protected_secret_delivery_verifier_store_v1_identity(&payload.verifier_store)?
+            != payload.verifier_store.identity
+        || protected_secret_delivery_binding_bundle_v1_identity(&payload.binding_bundle)?
+            != payload.binding_bundle.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V1, payload)
+}
+
+pub fn protected_authority_snapshot_response_v1_identity(
+    response: &ProtectedAuthoritySnapshotResponseV1,
+) -> Result<String, ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+        || response.protected_snapshot_identity
+            != protected_authority_snapshot_payload_v1_identity(&response.payload)?
+        || response.payload.request_identity != response.request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = response.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn reconcile_protected_authority_snapshot_response_v1(
+    request: &ProtectedAuthoritySnapshotRequestV1,
+    response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_authority_snapshot_request_v1(
+        request,
+        startup_continuation,
+        observed_at_unix_seconds,
+    )?;
+    if response.identity != protected_authority_snapshot_response_v1_identity(response)?
+        || serde_jcs::to_vec(response)
+            .map_err(|_| ProtocolError::InvalidRecord)?
+            .len()
+            > MAX_FRAME_BYTES - std::mem::size_of::<u32>()
+        || response.request_identity != request.identity
+        || response.payload.launcher_request_identity != request.launcher_request_identity
+        || response.payload.startup_continuation_identity != request.startup_continuation_identity
+        || response.payload.session_identity != request.session_identity
+        || response.payload.contract_identity != request.contract_identity
+        || response.payload.selected_execution_graph_identity
+            != request.selected_execution_graph_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    reconcile_protected_secret_delivery_authority_bundle_v1(
+        &response.payload.verifier_store,
+        &response.payload.binding_bundle,
+        observed_at_unix_seconds,
+    )
+}
+
+pub fn protected_authority_snapshot_request_v2_identity(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 2
+        || request.message_kind != PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_V2
+        || request.challenge.identity
+            != protected_authority_snapshot_challenge_v1_identity(&request.challenge)?
+        || !is_canonical_base64url_32_bytes(&request.nonce)
+        || [
+            &request.launcher_request_identity,
+            &request.startup_continuation_identity,
+            &request.contract_identity,
+            &request.selected_execution_graph_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let nonce = URL_SAFE_NO_PAD
+        .decode(&request.nonce)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if protected_authority_snapshot_nonce_commitment_v1(&nonce)?
+        != request.challenge.nonce_commitment
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V2,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_authority_snapshot_request_v2(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if request.identity != protected_authority_snapshot_request_v2_identity(request)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_authority_snapshot_challenge_v1(&request.challenge, observed_at_unix_seconds)
+}
+
+pub fn reconcile_protected_authority_snapshot_request_v2(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+    startup_continuation: &LauncherStartupContinuationV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    validate_protected_authority_snapshot_request_v2(request, observed_at_unix_seconds)?;
+    if startup_continuation.identity
+        != launcher_startup_continuation_identity(startup_continuation)?
+        || request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_authority_snapshot_payload_v2_identity(
+    payload: &ProtectedAuthoritySnapshotPayloadV2,
+) -> Result<String, ProtocolError> {
+    validate_protected_authority_snapshot_payload_v2(payload).map(|_| ())?;
+    protected_authority_snapshot_payload_v2_identity_validated(payload)
+}
+
+fn protected_authority_snapshot_payload_v2_identity_validated(
+    payload: &ProtectedAuthoritySnapshotPayloadV2,
+) -> Result<String, ProtocolError> {
+    message_identity(PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V2, payload)
+}
+
+fn validate_protected_authority_snapshot_payload_v2(
+    payload: &ProtectedAuthoritySnapshotPayloadV2,
+) -> Result<
+    (
+        ProtectedSecretDeliveryVerifierStoreV1,
+        ProtectedSecretDeliveryBindingBundleV1,
+    ),
+    ProtocolError,
+> {
+    if payload.schema_version != 2
+        || payload.record_kind != PROTECTED_AUTHORITY_SNAPSHOT_V2
+        || [
+            &payload.request_identity,
+            &payload.launcher_request_identity,
+            &payload.startup_continuation_identity,
+            &payload.contract_identity,
+            &payload.selected_execution_graph_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || payload.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                payload.startup_continuation_identity.as_str(),
+            )?
+        || payload.verifier_store_descriptor.role
+            != ProtectedLauncherDescriptorRoleV1::VerifierStore
+        || payload.binding_store_descriptor.role != ProtectedLauncherDescriptorRoleV1::BindingStore
+        || protected_launcher_descriptor_v1_identity(&payload.verifier_store_descriptor)?
+            != payload.verifier_store_descriptor.identity
+        || protected_launcher_descriptor_v1_identity(&payload.binding_store_descriptor)?
+            != payload.binding_store_descriptor.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let verifier_bytes = protected_authority_snapshot_store_bytes(&payload.verifier_store_bytes)?;
+    let binding_bytes = protected_authority_snapshot_store_bytes(&payload.binding_store_bytes)?;
+    let verifier_store =
+        serde_json::from_slice::<ProtectedSecretDeliveryVerifierStoreV1>(&verifier_bytes)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    let binding_bundle =
+        serde_json::from_slice::<ProtectedSecretDeliveryBindingBundleV1>(&binding_bytes)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    if serde_jcs::to_vec(&verifier_store).map_err(|_| ProtocolError::Canonicalization)?
+        != verifier_bytes
+        || serde_jcs::to_vec(&binding_bundle).map_err(|_| ProtocolError::Canonicalization)?
+            != binding_bytes
+        || payload.verifier_store_descriptor.size != verifier_bytes.len() as u64
+        || payload.binding_store_descriptor.size != binding_bytes.len() as u64
+        || (
+            payload.verifier_store_descriptor.device,
+            payload.verifier_store_descriptor.inode,
+        ) == (
+            payload.binding_store_descriptor.device,
+            payload.binding_store_descriptor.inode,
+        )
+        || payload
+            .verifier_store_descriptor
+            .content_identity
+            .as_deref()
+            != Some(
+                protected_launcher_store_content_identity_v1(
+                    ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                    &verifier_bytes,
+                )?
+                .as_str(),
+            )
+        || payload.binding_store_descriptor.content_identity.as_deref()
+            != Some(
+                protected_launcher_store_content_identity_v1(
+                    ProtectedLauncherDescriptorRoleV1::BindingStore,
+                    &binding_bytes,
+                )?
+                .as_str(),
+            )
+        || protected_secret_delivery_verifier_store_v1_identity(&verifier_store)?
+            != verifier_store.identity
+        || protected_secret_delivery_binding_bundle_v1_identity(&binding_bundle)?
+            != binding_bundle.identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok((verifier_store, binding_bundle))
+}
+
+pub fn protected_authority_snapshot_response_v2_identity(
+    response: &ProtectedAuthoritySnapshotResponseV2,
+) -> Result<String, ProtocolError> {
+    validate_protected_authority_snapshot_payload_v2(&response.payload)?;
+    protected_authority_snapshot_response_v2_identity_validated(response)
+}
+
+fn protected_authority_snapshot_response_v2_identity_validated(
+    response: &ProtectedAuthoritySnapshotResponseV2,
+) -> Result<String, ProtocolError> {
+    if response.schema_version != 2
+        || response.message_kind != PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_V2
+        || !is_sha256_identity(&response.request_identity)
+        || response.protected_snapshot_identity
+            != protected_authority_snapshot_payload_v2_identity_validated(&response.payload)?
+        || response.payload.request_identity != response.request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = response.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V2,
+        &canonical,
+    )
+}
+
+fn validate_protected_authority_snapshot_response_v2_frame_size(
+    canonical_response_len: usize,
+) -> Result<(), ProtocolError> {
+    if canonical_response_len > MAX_FRAME_BYTES - std::mem::size_of::<u32>() {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn reconcile_protected_authority_snapshot_response_v2(
+    request: &ProtectedAuthoritySnapshotRequestV2,
+    response: &ProtectedAuthoritySnapshotResponseV2,
+    startup_continuation: &LauncherStartupContinuationV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_authority_snapshot_request_v2(
+        request,
+        startup_continuation,
+        observed_at_unix_seconds,
+    )?;
+    let (verifier_store, binding_bundle) =
+        validate_protected_authority_snapshot_payload_v2(&response.payload)?;
+    if response.identity != protected_authority_snapshot_response_v2_identity_validated(response)?
+        || validate_protected_authority_snapshot_response_v2_frame_size(
+            serde_jcs::to_vec(response)
+                .map_err(|_| ProtocolError::InvalidRecord)?
+                .len(),
+        )
+        .is_err()
+        || response.request_identity != request.identity
+        || response.payload.launcher_request_identity != request.launcher_request_identity
+        || response.payload.startup_continuation_identity != request.startup_continuation_identity
+        || response.payload.session_identity != request.session_identity
+        || response.payload.contract_identity != request.contract_identity
+        || response.payload.selected_execution_graph_identity
+            != request.selected_execution_graph_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    reconcile_protected_secret_delivery_authority_bundle_v1(
+        &verifier_store,
+        &binding_bundle,
+        observed_at_unix_seconds,
+    )
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_request_v2_identity(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV2,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 2
+        || request.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V2
+        || request.observation.identity
+            != protected_launcher_capability_observation_request_v1_identity(&request.observation)?
+        || !is_sha256_identity(&request.launcher_request_identity)
+        || request.observation.expected_launcher_request_identity
+            != request.launcher_request_identity
+        || !is_sha256_identity(&request.secret_transaction_candidate_identity)
+        || !is_sha256_identity(&request.startup_continuation_identity)
+        || !is_sha256_identity(&request.same_child_capability_prelude_identity)
+        || !is_sha256_identity(&request.protected_snapshot_identity)
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V2,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_request_v2(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV2,
+) -> Result<(), ProtocolError> {
+    if request.identity
+        != protected_launcher_secret_delivery_transaction_binding_request_v2_identity(request)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_v2_identity(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV2,
+) -> Result<String, ProtocolError> {
+    if binding.schema_version != 2
+        || binding.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V2
+        || binding.expires_at_unix_seconds == 0
+        || [
+            &binding.request_identity,
+            &binding.launcher_request_identity,
+            &binding.startup_continuation_identity,
+            &binding.session_identity,
+            &binding.same_child_capability_prelude_identity,
+            &binding.protected_snapshot_identity,
+            &binding.protected_capability_identity,
+            &binding.secret_transaction_candidate_identity,
+            &binding.observation_request_identity,
+            &binding.projection_identity,
+            &binding.verifier_identity,
+            &binding.installation_evidence_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = binding.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V2,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_v2(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV2,
+) -> Result<(), ProtocolError> {
+    if binding.identity
+        != protected_launcher_secret_delivery_transaction_binding_v2_identity(binding)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles the additive V2 exchange to one retained private snapshot. Cryptographic signature
+/// verification for the public projection remains a Core responsibility.
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV2,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV2,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+    installation_evidence_identity: &str,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_authority_snapshot_response_v1(
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_secret_delivery_transaction_binding_request_v2(request)?;
+    validate_protected_same_child_capability_prelude_v1(prelude)?;
+    validate_protected_launcher_capability_observation_challenge_v1(
+        &request.observation.challenge,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_capability_projection_verifier_v1(verifier)?;
+    if request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+        || request.same_child_capability_prelude_identity != prelude.identity
+        || request.protected_snapshot_identity != snapshot_response.protected_snapshot_identity
+        || response.schema_version != 2
+        || response.message_kind
+            != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V2
+        || response.request_identity != request.identity
+        || response.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || response.protected_snapshot_identity != request.protected_snapshot_identity
+        || validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+            .is_err()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_secret_delivery_transaction_binding_v2(&response.binding)?;
+    let binding = &response.binding;
+    if binding.request_identity != request.identity
+        || binding.launcher_request_identity != request.launcher_request_identity
+        || binding.startup_continuation_identity != request.startup_continuation_identity
+        || binding.session_identity != request.session_identity
+        || binding.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || binding.protected_snapshot_identity != request.protected_snapshot_identity
+        || binding.protected_snapshot_identity != response.protected_snapshot_identity
+        || binding.secret_transaction_candidate_identity
+            != request.secret_transaction_candidate_identity
+        || binding.observation_request_identity != request.observation.identity
+        || prelude.observation_request_identity != request.observation.identity
+        || prelude.launcher_request_identity != request.launcher_request_identity
+        || prelude.startup_continuation_identity != request.startup_continuation_identity
+        || prelude.session_identity != request.session_identity
+        || binding.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || prelude.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || binding.projection_identity != response.projection.projection_identity
+        || prelude.projection_identity != response.projection.projection_identity
+        || binding.verifier_identity != verifier.identity
+        || prelude.verifier_identity != verifier.identity
+        || response.projection.payload.signing_key_identity != verifier.key_identity
+        || response.projection.payload.challenge_identity != request.observation.challenge.identity
+        || response.projection.payload.runner_version != request.observation.runner_version
+        || binding.installation_evidence_identity != installation_evidence_identity
+        || prelude.installation_evidence_identity != installation_evidence_identity
+        || !is_sha256_identity(installation_evidence_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles Launcher-private capability evidence before a snapshot-bound V2 response crosses
+/// to Core. The public response verifier cannot establish which protected capability produced the
+/// binding, so the Launcher must retain and compare that private identity here.
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV2,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV2,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+        request,
+        response,
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        prelude,
+        &evidence.verifier,
+        &evidence.installation_evidence_identity,
+        observed_at_unix_seconds,
+    )?;
+    let binding = &response.binding;
+    if protected_launcher_capability_v1_identity(&evidence.protected_capability)?
+        != evidence.protected_capability.identity
+        || binding.protected_capability_identity != evidence.protected_capability.identity
+        || prelude.protected_capability_identity != evidence.protected_capability.identity
+        || response.projection != evidence.projection
+        || evidence.protected_capability.launcher_request_identity
+            != request.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_request_v3_identity(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 3
+        || request.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V3
+        || request.observation.identity
+            != protected_launcher_capability_observation_request_v1_identity(&request.observation)?
+        || !is_sha256_identity(&request.launcher_request_identity)
+        || request.observation.expected_launcher_request_identity
+            != request.launcher_request_identity
+        || !is_sha256_identity(&request.secret_transaction_candidate_identity)
+        || !is_sha256_identity(&request.startup_continuation_identity)
+        || !is_sha256_identity(&request.same_child_capability_prelude_identity)
+        || !is_sha256_identity(&request.protected_snapshot_identity)
+        || !is_sha256_identity(&request.transport_dependency_record_identity)
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V3,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_request_v3(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+) -> Result<(), ProtocolError> {
+    if request.identity
+        != protected_launcher_secret_delivery_transaction_binding_request_v3_identity(request)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_v3_identity(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV3,
+) -> Result<String, ProtocolError> {
+    if binding.schema_version != 3
+        || binding.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V3
+        || binding.expires_at_unix_seconds == 0
+        || [
+            &binding.request_identity,
+            &binding.launcher_request_identity,
+            &binding.startup_continuation_identity,
+            &binding.session_identity,
+            &binding.same_child_capability_prelude_identity,
+            &binding.protected_snapshot_identity,
+            &binding.protected_capability_identity,
+            &binding.secret_transaction_candidate_identity,
+            &binding.observation_request_identity,
+            &binding.projection_identity,
+            &binding.verifier_identity,
+            &binding.installation_evidence_identity,
+            &binding.transport_dependency_record_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = binding.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V3,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_v3(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV3,
+) -> Result<(), ProtocolError> {
+    if binding.identity
+        != protected_launcher_secret_delivery_transaction_binding_v3_identity(binding)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles the additive V3 exchange, including exact build-provenance identity.
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV3,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+    installation_evidence_identity: &str,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_authority_snapshot_response_v1(
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_secret_delivery_transaction_binding_request_v3(request)?;
+    validate_protected_same_child_capability_prelude_v1(prelude)?;
+    validate_protected_launcher_capability_observation_challenge_v1(
+        &request.observation.challenge,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_capability_projection_verifier_v1(verifier)?;
+    if request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+        || request.same_child_capability_prelude_identity != prelude.identity
+        || request.protected_snapshot_identity != snapshot_response.protected_snapshot_identity
+        || response.schema_version != 3
+        || response.message_kind
+            != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V3
+        || response.request_identity != request.identity
+        || response.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || response.protected_snapshot_identity != request.protected_snapshot_identity
+        || validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+            .is_err()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_secret_delivery_transaction_binding_v3(&response.binding)?;
+    let binding = &response.binding;
+    if binding.request_identity != request.identity
+        || binding.launcher_request_identity != request.launcher_request_identity
+        || binding.startup_continuation_identity != request.startup_continuation_identity
+        || binding.session_identity != request.session_identity
+        || binding.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || binding.protected_snapshot_identity != request.protected_snapshot_identity
+        || binding.protected_snapshot_identity != response.protected_snapshot_identity
+        || binding.secret_transaction_candidate_identity
+            != request.secret_transaction_candidate_identity
+        || binding.transport_dependency_record_identity
+            != request.transport_dependency_record_identity
+        || binding.observation_request_identity != request.observation.identity
+        || prelude.observation_request_identity != request.observation.identity
+        || prelude.launcher_request_identity != request.launcher_request_identity
+        || prelude.startup_continuation_identity != request.startup_continuation_identity
+        || prelude.session_identity != request.session_identity
+        || binding.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || prelude.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || binding.projection_identity != response.projection.projection_identity
+        || prelude.projection_identity != response.projection.projection_identity
+        || binding.verifier_identity != verifier.identity
+        || prelude.verifier_identity != verifier.identity
+        || response.projection.payload.signing_key_identity != verifier.key_identity
+        || response.projection.payload.challenge_identity != request.observation.challenge.identity
+        || response.projection.payload.runner_version != request.observation.runner_version
+        || binding.installation_evidence_identity != installation_evidence_identity
+        || prelude.installation_evidence_identity != installation_evidence_identity
+        || !is_sha256_identity(installation_evidence_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+/// Reconciles Launcher-private evidence before a V3 response crosses to Core.
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v3(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV3,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV1,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV1,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
+        request,
+        response,
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        prelude,
+        &evidence.verifier,
+        &evidence.installation_evidence_identity,
+        observed_at_unix_seconds,
+    )?;
+    let binding = &response.binding;
+    if protected_launcher_capability_v1_identity(&evidence.protected_capability)?
+        != evidence.protected_capability.identity
+        || binding.protected_capability_identity != evidence.protected_capability.identity
+        || prelude.protected_capability_identity != evidence.protected_capability.identity
+        || response.projection != evidence.projection
+        || evidence.protected_capability.launcher_request_identity
+            != request.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_request_v4_identity(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV4,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 4
+        || request.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V4
+        || request.protected_snapshot_schema_version != 2
+        || request.protected_snapshot_record_kind != PROTECTED_AUTHORITY_SNAPSHOT_V2
+        || request.observation.identity
+            != protected_launcher_capability_observation_request_v1_identity(&request.observation)?
+        || !is_sha256_identity(&request.launcher_request_identity)
+        || request.observation.expected_launcher_request_identity
+            != request.launcher_request_identity
+        || [
+            &request.secret_transaction_candidate_identity,
+            &request.startup_continuation_identity,
+            &request.same_child_capability_prelude_identity,
+            &request.protected_snapshot_identity,
+            &request.transport_dependency_record_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+        || request.session_identity
+            != protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V4,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_request_v4(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV4,
+) -> Result<(), ProtocolError> {
+    if request.identity
+        != protected_launcher_secret_delivery_transaction_binding_request_v4_identity(request)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_secret_delivery_transaction_binding_v4_identity(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV4,
+) -> Result<String, ProtocolError> {
+    if binding.schema_version != 4
+        || binding.message_kind != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V4
+        || binding.protected_snapshot_schema_version != 2
+        || binding.protected_snapshot_record_kind != PROTECTED_AUTHORITY_SNAPSHOT_V2
+        || binding.expires_at_unix_seconds == 0
+        || [
+            &binding.request_identity,
+            &binding.launcher_request_identity,
+            &binding.startup_continuation_identity,
+            &binding.session_identity,
+            &binding.same_child_capability_prelude_identity,
+            &binding.protected_snapshot_identity,
+            &binding.protected_capability_identity,
+            &binding.secret_transaction_candidate_identity,
+            &binding.observation_request_identity,
+            &binding.projection_identity,
+            &binding.verifier_identity,
+            &binding.installation_evidence_identity,
+            &binding.transport_dependency_record_identity,
+        ]
+        .into_iter()
+        .any(|identity| !is_sha256_identity(identity))
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = binding.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V4,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_secret_delivery_transaction_binding_v4(
+    binding: &ProtectedLauncherSecretDeliveryTransactionBindingV4,
+) -> Result<(), ProtocolError> {
+    if binding.identity
+        != protected_launcher_secret_delivery_transaction_binding_v4_identity(binding)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_response_v4(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV4,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV4,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV2,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV2,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+    installation_evidence_identity: &str,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_authority_snapshot_response_v2(
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_secret_delivery_transaction_binding_request_v4(request)?;
+    validate_protected_same_child_capability_prelude_v1(prelude)?;
+    validate_protected_launcher_capability_observation_challenge_v1(
+        &request.observation.challenge,
+        observed_at_unix_seconds,
+    )?;
+    validate_protected_launcher_capability_projection_verifier_v1(verifier)?;
+    if request.startup_continuation_identity != startup_continuation.identity
+        || request.launcher_request_identity != startup_continuation.launcher_request_identity
+        || request.same_child_capability_prelude_identity != prelude.identity
+        || request.protected_snapshot_identity != snapshot_response.protected_snapshot_identity
+        || request.protected_snapshot_schema_version != snapshot_response.payload.schema_version
+        || request.protected_snapshot_record_kind != snapshot_response.payload.record_kind
+        || response.schema_version != 4
+        || response.message_kind
+            != PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V4
+        || response.request_identity != request.identity
+        || response.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || response.protected_snapshot_identity != request.protected_snapshot_identity
+        || response.protected_snapshot_schema_version != request.protected_snapshot_schema_version
+        || response.protected_snapshot_record_kind != request.protected_snapshot_record_kind
+        || validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+            .is_err()
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_secret_delivery_transaction_binding_v4(&response.binding)?;
+    let binding = &response.binding;
+    if binding.request_identity != request.identity
+        || binding.launcher_request_identity != request.launcher_request_identity
+        || binding.startup_continuation_identity != request.startup_continuation_identity
+        || binding.session_identity != request.session_identity
+        || binding.same_child_capability_prelude_identity
+            != request.same_child_capability_prelude_identity
+        || binding.protected_snapshot_identity != request.protected_snapshot_identity
+        || binding.protected_snapshot_identity != response.protected_snapshot_identity
+        || binding.protected_snapshot_schema_version != request.protected_snapshot_schema_version
+        || binding.protected_snapshot_record_kind != request.protected_snapshot_record_kind
+        || binding.secret_transaction_candidate_identity
+            != request.secret_transaction_candidate_identity
+        || binding.transport_dependency_record_identity
+            != request.transport_dependency_record_identity
+        || binding.observation_request_identity != request.observation.identity
+        || prelude.observation_request_identity != request.observation.identity
+        || prelude.launcher_request_identity != request.launcher_request_identity
+        || prelude.startup_continuation_identity != request.startup_continuation_identity
+        || prelude.session_identity != request.session_identity
+        || binding.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || prelude.expires_at_unix_seconds != request.observation.challenge.expires_at_unix_seconds
+        || binding.projection_identity != response.projection.projection_identity
+        || prelude.projection_identity != response.projection.projection_identity
+        || binding.verifier_identity != verifier.identity
+        || prelude.verifier_identity != verifier.identity
+        || response.projection.payload.signing_key_identity != verifier.key_identity
+        || response.projection.payload.challenge_identity != request.observation.challenge.identity
+        || response.projection.payload.runner_version != request.observation.runner_version
+        || binding.installation_evidence_identity != installation_evidence_identity
+        || prelude.installation_evidence_identity != installation_evidence_identity
+        || !is_sha256_identity(installation_evidence_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_protected_launcher_secret_delivery_transaction_binding_v4(
+    request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV4,
+    response: &ProtectedLauncherSecretDeliveryTransactionBindingResponseV4,
+    snapshot_request: &ProtectedAuthoritySnapshotRequestV2,
+    snapshot_response: &ProtectedAuthoritySnapshotResponseV2,
+    startup_continuation: &LauncherStartupContinuationV1,
+    prelude: &ProtectedSameChildCapabilityPreludeV1,
+    evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    reconcile_protected_launcher_secret_delivery_transaction_binding_response_v4(
+        request,
+        response,
+        snapshot_request,
+        snapshot_response,
+        startup_continuation,
+        prelude,
+        &evidence.verifier,
+        &evidence.installation_evidence_identity,
+        observed_at_unix_seconds,
+    )?;
+    let binding = &response.binding;
+    if protected_launcher_capability_v1_identity(&evidence.protected_capability)?
+        != evidence.protected_capability.identity
+        || binding.protected_capability_identity != evidence.protected_capability.identity
+        || prelude.protected_capability_identity != evidence.protected_capability.identity
+        || response.projection != evidence.projection
+        || evidence.protected_capability.launcher_request_identity
+            != request.launcher_request_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_capability_observation_signing_request_v1_identity(
+    request: &ProtectedLauncherCapabilityObservationSigningRequestV1,
+) -> Result<String, ProtocolError> {
+    if request.schema_version != 1
+        || request.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST
+        || !is_sha256_identity(&request.producer_binding_identity)
+        || !is_sha256_identity(&request.verifier_identity)
+        || !is_sha256_identity(&request.protected_capability_identity)
+        || request.projection_identity
+            != protected_launcher_capability_observation_projection_v1_identity(&request.payload)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = request.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_observation_signing_request_v1(
+    request: &ProtectedLauncherCapabilityObservationSigningRequestV1,
+) -> Result<(), ProtocolError> {
+    if request.identity
+        != protected_launcher_capability_observation_signing_request_v1_identity(request)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn validate_protected_launcher_capability_observation_signing_response_v1(
+    response: &ProtectedLauncherCapabilityObservationSigningResponseV1,
+) -> Result<(), ProtocolError> {
+    if response.schema_version != 1
+        || response.message_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE
+        || !is_sha256_identity(&response.request_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_protected_launcher_capability_observation_projection_v1(&response.projection)
+}
+
+pub fn reconcile_protected_launcher_capability_observation_signing_response_v1(
+    request: &ProtectedLauncherCapabilityObservationSigningRequestV1,
+    response: &ProtectedLauncherCapabilityObservationSigningResponseV1,
+) -> Result<(), ProtocolError> {
+    validate_protected_launcher_capability_observation_signing_request_v1(request)?;
+    validate_protected_launcher_capability_observation_signing_response_v1(response)?;
+    if response.request_identity != request.identity
+        || response.projection.payload != request.payload
+        || response.projection.projection_identity != request.projection_identity
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_capability_projection_key_identity_v1(
+    public_key: &str,
+) -> Result<String, ProtocolError> {
+    if !is_canonical_ed25519_public_key(public_key) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_KEY_IDENTITY_DOMAIN_V1,
+        &public_key,
+    )
+}
+
+pub fn protected_launcher_capability_observation_projection_v1_identity(
+    payload: &ProtectedLauncherCapabilityObservationProjectionPayloadV1,
+) -> Result<String, ProtocolError> {
+    if payload.schema_version != 1
+        || payload.evidence_kind != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION
+        || !is_sha256_identity(&payload.challenge_identity)
+        || payload.derivation != "verified"
+        || payload.target.environment != "self_hosted"
+        || payload.target.os != "linux"
+        || payload.target.architecture != "x64"
+        || payload.capability_class != "systemd_protected_launcher_v4"
+        || !is_canonical_semver(&payload.runner_version)
+        || !is_sha256_identity(&payload.signing_key_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_IDENTITY_DOMAIN_V1,
+        payload,
+    )
+}
+
+pub fn protected_launcher_capability_observation_signature_message_v1(
+    projection_identity: &str,
+) -> Result<Vec<u8>, ProtocolError> {
+    if !is_sha256_identity(projection_identity) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(domain_separated(
+        PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1,
+        projection_identity.as_bytes(),
+    ))
+}
+
+pub fn validate_protected_launcher_capability_observation_projection_v1(
+    projection: &ProtectedLauncherCapabilityObservationProjectionV1,
+) -> Result<(), ProtocolError> {
+    if projection.projection_identity
+        != protected_launcher_capability_observation_projection_v1_identity(&projection.payload)?
+        || !is_canonical_ed25519_signature(&projection.signature)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_launcher_capability_projection_verifier_v1_identity(
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+) -> Result<String, ProtocolError> {
+    let signature_domain =
+        std::str::from_utf8(PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    if verifier.schema_version != 1
+        || verifier.record_kind != PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER
+        || !is_canonical_ed25519_public_key(&verifier.public_key)
+        || verifier.key_identity
+            != protected_launcher_capability_projection_key_identity_v1(&verifier.public_key)?
+        || verifier.key_usage != PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1
+        || verifier.signature_domain != signature_domain
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = verifier.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_launcher_capability_projection_verifier_v1(
+    verifier: &ProtectedLauncherCapabilityProjectionVerifierV1,
+) -> Result<(), ProtocolError> {
+    if verifier.identity != protected_launcher_capability_projection_verifier_v1_identity(verifier)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_secret_delivery_binding_bundle_key_identity_v1(
+    public_key: &str,
+) -> Result<String, ProtocolError> {
+    if !is_canonical_ed25519_public_key(public_key) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_IDENTITY_DOMAIN_V1,
+        &public_key,
+    )
+}
+
+pub fn protected_secret_delivery_binding_bundle_verifier_v1_identity(
+    verifier: &ProtectedSecretDeliveryBindingBundleVerifierV1,
+) -> Result<String, ProtocolError> {
+    let signature_domain =
+        std::str::from_utf8(PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1)
+            .map_err(|_| ProtocolError::InvalidRecord)?;
+    if verifier.schema_version != 1
+        || verifier.record_kind != PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER
+        || !is_canonical_ed25519_public_key(&verifier.public_key)
+        || verifier.key_identity
+            != protected_secret_delivery_binding_bundle_key_identity_v1(&verifier.public_key)?
+        || verifier.key_usage != PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_USAGE_V1
+        || verifier.signature_domain != signature_domain
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = verifier.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_secret_delivery_binding_bundle_verifier_v1(
+    verifier: &ProtectedSecretDeliveryBindingBundleVerifierV1,
+) -> Result<(), ProtocolError> {
+    if verifier.identity != protected_secret_delivery_binding_bundle_verifier_v1_identity(verifier)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_secret_delivery_verifier_store_v1_identity(
+    store: &ProtectedSecretDeliveryVerifierStoreV1,
+) -> Result<String, ProtocolError> {
+    if store.schema_version != 1
+        || store.record_kind != PROTECTED_SECRET_DELIVERY_VERIFIER_STORE
+        || !is_bounded_label(&store.authority_id, 128)
+        || store.generation == 0
+        || store.not_before_unix_seconds == 0
+        || store.not_after_unix_seconds <= store.not_before_unix_seconds
+        || store.verifiers.len() != 1
+        || store.active_binding_bundle_generation == 0
+        || !is_sha256_identity(&store.active_binding_bundle_identity)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let verifier = &store.verifiers[0];
+    validate_protected_secret_delivery_binding_bundle_verifier_v1(verifier)?;
+    let mut canonical = store.clone();
+    canonical.identity.clear();
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_VERIFIER_STORE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+pub fn validate_protected_secret_delivery_verifier_store_v1(
+    store: &ProtectedSecretDeliveryVerifierStoreV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    if store.identity != protected_secret_delivery_verifier_store_v1_identity(store)?
+        || observed_at_unix_seconds < store.not_before_unix_seconds
+        || observed_at_unix_seconds > store.not_after_unix_seconds
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+pub fn protected_secret_delivery_binding_bundle_payload_bytes_v1(
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+) -> Result<Vec<u8>, ProtocolError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&bundle.payload)
+        .map_err(|_| ProtocolError::InvalidRecord)?;
+    if bytes.is_empty()
+        || bytes.len() > MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1
+        || URL_SAFE_NO_PAD.encode(&bytes) != bundle.payload
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(bytes)
+}
+
+pub fn protected_secret_delivery_binding_bundle_payload_v1_identity(
+    payload: &[u8],
+) -> Result<String, ProtocolError> {
+    if payload.is_empty()
+        || payload.len() > MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(sha256_identity(&domain_separated(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_IDENTITY_DOMAIN_V1,
+        payload,
+    )))
+}
+
+pub fn protected_secret_delivery_binding_bundle_v1_identity(
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+) -> Result<String, ProtocolError> {
+    if bundle.schema_version != 1
+        || bundle.record_kind != PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE
+        || !is_bounded_label(&bundle.authority_id, 128)
+        || bundle.generation == 0
+        || bundle.issued_at_unix_seconds == 0
+        || bundle.expires_at_unix_seconds <= bundle.issued_at_unix_seconds
+        || !is_sha256_identity(&bundle.verifier_identity)
+        || !is_canonical_ed25519_signature(&bundle.signature)
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let payload = protected_secret_delivery_binding_bundle_payload_bytes_v1(bundle)?;
+    if bundle.payload_identity
+        != protected_secret_delivery_binding_bundle_payload_v1_identity(&payload)?
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let mut canonical = bundle.clone();
+    canonical.identity.clear();
+    canonical.signature.clear();
+    if serde_jcs::to_vec(bundle)
+        .map_err(|_| ProtocolError::Canonicalization)?
+        .len()
+        > MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    message_identity(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_IDENTITY_DOMAIN_V1,
+        &canonical,
+    )
+}
+
+/// Exact bytes that the admitted verifier signs for an authority bundle.
+pub fn protected_secret_delivery_binding_bundle_signature_message_v1(
+    bundle_identity: &str,
+) -> Result<Vec<u8>, ProtocolError> {
+    if !is_sha256_identity(bundle_identity) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(domain_separated(
+        PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1,
+        bundle_identity.as_bytes(),
+    ))
+}
+
+pub fn validate_protected_secret_delivery_binding_bundle_v1(
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+) -> Result<(), ProtocolError> {
+    if bundle.identity != protected_secret_delivery_binding_bundle_v1_identity(bundle)? {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    protected_secret_delivery_binding_bundle_signature_message_v1(bundle.identity.as_str())?;
+    Ok(())
+}
+
+/// Reconciles the root-owned active verifier store to exactly one signed binding bundle.
+/// Cryptographic signature verification and descriptor re-observation remain with Launcher/Core.
+pub fn reconcile_protected_secret_delivery_authority_bundle_v1(
+    store: &ProtectedSecretDeliveryVerifierStoreV1,
+    bundle: &ProtectedSecretDeliveryBindingBundleV1,
+    observed_at_unix_seconds: u64,
+) -> Result<(), ProtocolError> {
+    validate_protected_secret_delivery_verifier_store_v1(store, observed_at_unix_seconds)?;
+    validate_protected_secret_delivery_binding_bundle_v1(bundle)?;
+    let verifier = &store.verifiers[0];
+    if bundle.authority_id != store.authority_id
+        || bundle.generation != store.active_binding_bundle_generation
+        || bundle.identity != store.active_binding_bundle_identity
+        || bundle.verifier_identity != verifier.identity
+        || bundle.issued_at_unix_seconds < store.not_before_unix_seconds
+        || bundle.expires_at_unix_seconds > store.not_after_unix_seconds
+        || observed_at_unix_seconds < bundle.issued_at_unix_seconds
+        || observed_at_unix_seconds > bundle.expires_at_unix_seconds
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
+}
+
+fn canonical_protected_launcher_descriptors(
+    descriptors: &[ProtectedLauncherDescriptorV1],
+) -> Vec<ProtectedLauncherDescriptorV1> {
+    let mut descriptors = descriptors.to_vec();
+    descriptors.sort_by_key(|descriptor| descriptor.role);
+    descriptors
+}
+
+pub fn validate_protected_launcher_capability_v1(
+    capability: &ProtectedLauncherCapabilityV1,
+    evidence: &ProtectedLauncherCapabilityEvidenceV1<'_>,
+) -> Result<(), ProtocolError> {
+    if protected_launcher_capability_v1_identity(capability)? != capability.identity {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    validate_launcher_invocation_request_v1(evidence.request)?;
+    let request_identity = launcher_invocation_request_identity(evidence.request)?;
+    let child_identity = launcher_child_process_identity(evidence.child)?;
+    let scope_identity = launcher_systemd_scope_identity(evidence.scope)?;
+    let principal_mapping_identity =
+        launcher_principal_mapping_identity(evidence.principal_mapping)?;
+    let process_posture_identity = ota_process_posture_identity(evidence.process_posture)?;
+    validate_systemd_protected_launcher_instance_v3(evidence.launcher_instance)?;
+
+    let observed_descriptors =
+        canonical_protected_launcher_descriptors(evidence.observed_descriptors);
+    if observed_descriptors != canonical_protected_launcher_descriptors(&capability.descriptors) {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    let verifier_descriptor = observed_descriptors
+        .iter()
+        .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore)
+        .ok_or(ProtocolError::InvalidRecord)?;
+    let binding_descriptor = observed_descriptors
+        .iter()
+        .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore)
+        .ok_or(ProtocolError::InvalidRecord)?;
+    let cgroup_descriptor = observed_descriptors
+        .iter()
+        .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::InvocationCgroup)
+        .ok_or(ProtocolError::InvalidRecord)?;
+    let verifier_store_identity = protected_launcher_store_content_identity_v1(
+        ProtectedLauncherDescriptorRoleV1::VerifierStore,
+        evidence.verifier_store_bytes,
+    )?;
+    let binding_store_identity = protected_launcher_store_content_identity_v1(
+        ProtectedLauncherDescriptorRoleV1::BindingStore,
+        evidence.binding_store_bytes,
+    )?;
+    let cgroup_identity = protected_launcher_cgroup_v1_identity(evidence.scope, cgroup_descriptor)?;
+
+    let instance = &evidence.launcher_instance.instance_v1;
+    if capability.launcher_request_identity != request_identity
+        || capability.launcher_executable_identity != evidence.launcher_executable_identity
+        || capability.launcher_configuration_identity != evidence.launcher_configuration_identity
+        || capability.launcher_service_binding_identity
+            != evidence.launcher_service_binding_identity
+        || capability.launcher_profile_identity != evidence.launcher_profile_identity
+        || capability.runner_administrator_identity != evidence.runner_administrator_identity
+        || capability.service_uid != evidence.service_uid
+        || capability.service_gid != evidence.service_gid
+        || capability.invocation_nonce_identity != evidence.invocation_nonce_identity
+        || capability.boot_identity != evidence.boot_identity
+        || capability.protected_launcher_instance_identity != evidence.launcher_instance.identity
+        || capability.systemd_invocation_identity != scope_identity
+        || capability.systemd_scope_identity != scope_identity
+        || capability.cgroup_identity != cgroup_identity
+        || capability.child_process_identity != child_identity
+        || capability.principal_mapping_identity != principal_mapping_identity
+        || capability.process_posture_identity != process_posture_identity
+        || capability.implementation_subject_identity != evidence.implementation_subject_identity
+        || evidence.child.identity != child_identity
+        || evidence.child.request_identity != request_identity
+        || evidence.child.principal_mapping_identity != principal_mapping_identity
+        || evidence.scope.identity != scope_identity
+        || evidence.scope.request_identity != request_identity
+        || evidence.scope.child_identity != child_identity
+        || evidence.scope.child_pid != evidence.child.pid
+        || evidence.scope.invocation_id != evidence.child.invocation_id
+        || evidence.principal_mapping.identity != principal_mapping_identity
+        || evidence.process_posture.identity != process_posture_identity
+        || evidence.process_posture.pid != evidence.child.pid
+        || evidence.process_posture.process_start_time_identity
+            != evidence.child.process_start_time_identity
+        || evidence.process_posture.ota_binary_identity != evidence.child.ota_binary_identity
+        || evidence.process_posture.principal_mapping_identity != principal_mapping_identity
+        || instance.principal_mapping != *evidence.principal_mapping
+        || instance.process_posture != *evidence.process_posture
+        || instance.systemd_launcher_profile_identity != evidence.launcher_profile_identity
+        || instance.launcher_session_binding_identity != evidence.launcher_configuration_identity
+        || instance.systemd_invocation_identity != scope_identity
+        || instance.working_directory_identity != evidence.child.working_directory_identity
+        || instance.child_process_identity != child_identity
+        || verifier_descriptor.content_identity.as_deref() != Some(verifier_store_identity.as_str())
+        || verifier_descriptor.size != evidence.verifier_store_bytes.len() as u64
+        || binding_descriptor.content_identity.as_deref() != Some(binding_store_identity.as_str())
+        || binding_descriptor.size != evidence.binding_store_bytes.len() as u64
+    {
+        return Err(ProtocolError::InvalidRecord);
+    }
+    Ok(())
 }
 
 pub fn launcher_execution_completion_v1_identity(
@@ -2566,6 +5587,17 @@ fn is_absolute_bounded_path(value: &str, maximum_bytes: usize) -> bool {
         && !value.split('/').any(|component| component == "..")
 }
 
+fn is_canonical_absolute_bounded_path(value: &str, maximum_bytes: usize) -> bool {
+    is_absolute_bounded_path(value, maximum_bytes)
+        && value != "/"
+        && !value.starts_with("//")
+        && !value.ends_with('/')
+        && !value
+            .split('/')
+            .skip(1)
+            .any(|component| component.is_empty() || component == ".")
+}
+
 fn has_duplicate_strings(values: &[String]) -> bool {
     values
         .iter()
@@ -3076,6 +6108,24 @@ pub fn systemd_launcher_profile_v3() -> SystemdLauncherProfileDefinitionV1 {
     profile
 }
 
+/// Process-inspection profile with one manager-opened boot-ID descriptor.
+///
+/// V4 preserves V3's procfs namespace and adds two named inherited descriptor roles so the
+/// Launcher can retain the kernel boot identity without widening the selected child's procfs view.
+pub fn systemd_launcher_profile_v4() -> SystemdLauncherProfileDefinitionV1 {
+    let mut profile = systemd_launcher_profile_v3();
+    profile.profile_id = SYSTEMD_LAUNCHER_PROFILE_ID_V4.into();
+    profile.service_settings.push(systemd_setting(
+        "OpenFile",
+        "/proc/sys/kernel/random/boot_id:ota-boot-id:read-only",
+    ));
+    profile.socket_settings.push(systemd_setting(
+        "FileDescriptorName",
+        "ota-launcher-listener",
+    ));
+    profile
+}
+
 pub fn systemd_launcher_profile_by_id(
     profile_id: &str,
 ) -> Option<SystemdLauncherProfileDefinitionV1> {
@@ -3083,6 +6133,7 @@ pub fn systemd_launcher_profile_by_id(
         SYSTEMD_LAUNCHER_PROFILE_ID_V1 => Some(systemd_launcher_profile_v1()),
         SYSTEMD_LAUNCHER_PROFILE_ID_V2 => Some(systemd_launcher_profile_v2()),
         SYSTEMD_LAUNCHER_PROFILE_ID_V3 => Some(systemd_launcher_profile_v3()),
+        SYSTEMD_LAUNCHER_PROFILE_ID_V4 => Some(systemd_launcher_profile_v4()),
         _ => None,
     }
 }
@@ -3310,7 +6361,7 @@ fn validate_systemd_protected_launcher_instance_v3_foundation(
     validate_systemd_protected_launcher_instance_foundation(instance, true)
 }
 
-/// Derive the nested foundation identity for the exact V3 launcher and V2 job-principal branch.
+/// Derive the nested foundation identity for a current launcher profile and V2 job-principal.
 /// Legacy callers must continue using `systemd_protected_launcher_instance_identity`.
 pub fn systemd_protected_launcher_instance_v3_foundation_identity(
     instance: &SystemdProtectedLauncherInstanceEvidenceV1,
@@ -3328,7 +6379,7 @@ fn validate_systemd_protected_launcher_instance_foundation(
     let mapping_identity = launcher_principal_mapping_identity(&instance.principal_mapping)?;
     let posture_identity = ota_process_posture_identity(&instance.process_posture)?;
     let launcher_profiles = if v3 {
-        vec![systemd_launcher_profile_v3()]
+        vec![systemd_launcher_profile_v3(), systemd_launcher_profile_v4()]
     } else {
         vec![systemd_launcher_profile_v1(), systemd_launcher_profile_v2()]
     };
@@ -3407,10 +6458,17 @@ fn validate_systemd_protected_launcher_instance_v2(
             if instance.instance_v1.identity != foundation_identity {
                 return Err(ProtocolError::InvalidRecord);
             }
-            (
-                systemd_launcher_profile_v3(),
-                systemd_job_principal_profile_v2(),
-            )
+            let launcher_profile = [systemd_launcher_profile_v3(), systemd_launcher_profile_v4()]
+                .into_iter()
+                .find(|profile| {
+                    systemd_launcher_profile_identity(profile).as_deref()
+                        == Ok(instance
+                            .instance_v1
+                            .systemd_launcher_profile_identity
+                            .as_str())
+                })
+                .ok_or(ProtocolError::InvalidRecord)?;
+            (launcher_profile, systemd_job_principal_profile_v2())
         }
         _ => return Err(ProtocolError::InvalidRecord),
     };
@@ -3458,8 +6516,13 @@ fn validate_systemd_protected_launcher_instance_v3(
     instance: &SystemdProtectedLauncherInstanceEvidenceV2,
 ) -> Result<(), ProtocolError> {
     validate_systemd_protected_launcher_instance_v2(instance)?;
-    let launcher_profile_identity =
-        systemd_launcher_profile_identity(&systemd_launcher_profile_v3())?;
+    let launcher_profile_identity = [systemd_launcher_profile_v3(), systemd_launcher_profile_v4()]
+        .into_iter()
+        .find_map(|profile| {
+            let identity = systemd_launcher_profile_identity(&profile).ok()?;
+            (identity == instance.instance_v1.systemd_launcher_profile_identity).then_some(identity)
+        })
+        .ok_or(ProtocolError::InvalidRecord)?;
     let job_profile_identity =
         systemd_job_principal_profile_identity(&systemd_job_principal_profile_v2())?;
     if instance.schema_version != 3
@@ -3494,6 +6557,190 @@ fn is_sha256_identity(value: &str) -> bool {
         && value[7..]
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_canonical_git_revision(value: &str) -> bool {
+    value.len() == 40
+        && value.bytes().any(|byte| byte != b'0')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn is_canonical_lowercase_label(value: &str, maximum_bytes: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum_bytes
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+        })
+        && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
+fn is_canonical_lowercase_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value != "00000000-0000-0000-0000-000000000000"
+        && value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'),
+        })
+}
+
+fn is_base64url_no_pad(value: &str, exact_len: usize) -> bool {
+    value.len() == exact_len
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn is_canonical_base64url_32_bytes(value: &str) -> bool {
+    is_base64url_no_pad(value, 43)
+        && URL_SAFE_NO_PAD
+            .decode(value)
+            .is_ok_and(|bytes| bytes.len() == 32)
+}
+
+fn is_canonical_nonzero_base64url_32_bytes(value: &str) -> bool {
+    is_canonical_base64url_32_bytes(value)
+        && URL_SAFE_NO_PAD
+            .decode(value)
+            .is_ok_and(|bytes| bytes.iter().any(|byte| *byte != 0))
+}
+
+fn is_canonical_ed25519_public_key(value: &str) -> bool {
+    is_base64url_no_pad(value, 43)
+        && value.as_bytes().last().is_some_and(|byte| {
+            matches!(
+                byte,
+                b'A' | b'E'
+                    | b'I'
+                    | b'M'
+                    | b'Q'
+                    | b'U'
+                    | b'Y'
+                    | b'c'
+                    | b'g'
+                    | b'k'
+                    | b'o'
+                    | b's'
+                    | b'w'
+                    | b'0'
+                    | b'4'
+                    | b'8'
+            )
+        })
+}
+
+fn is_canonical_ed25519_signature(value: &str) -> bool {
+    is_base64url_no_pad(value, 86)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| matches!(byte, b'A' | b'Q' | b'g' | b'w'))
+}
+
+fn is_canonical_positive_decimal(value: &str) -> bool {
+    value
+        .parse::<u64>()
+        .is_ok_and(|parsed| parsed > 0 && value == parsed.to_string())
+}
+
+fn is_canonical_semver(value: &str) -> bool {
+    value.len() <= 128 && Version::parse(value).is_ok_and(|parsed| parsed.to_string() == value)
+}
+
+fn is_canonical_workflow_reference(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 512
+        || !value.is_ascii()
+        || value
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return false;
+    }
+    let Some((workflow_path, git_ref)) = value.split_once('@') else {
+        return false;
+    };
+    if git_ref.contains('@') {
+        return false;
+    }
+    let Some(ref_name) = git_ref
+        .strip_prefix("refs/heads/")
+        .or_else(|| git_ref.strip_prefix("refs/tags/"))
+    else {
+        return false;
+    };
+    if ref_name.is_empty()
+        || ref_name.starts_with('.')
+        || ref_name.ends_with('.')
+        || ref_name.contains("..")
+        || ref_name.contains("@{")
+        || !ref_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'))
+        || ref_name.split('/').any(|component| {
+            component.is_empty()
+                || component.starts_with('.')
+                || matches!(component, "." | "..")
+                || component.ends_with(".lock")
+        })
+    {
+        return false;
+    }
+    let segments = workflow_path.split('/').collect::<Vec<_>>();
+    segments.len() == 5
+        && is_canonical_github_owner(segments[0])
+        && is_canonical_github_repository(segments[1])
+        && segments[2] == ".github"
+        && segments[3] == "workflows"
+        && segments[4..].iter().all(|segment| {
+            !segment.is_empty()
+                && !segment.starts_with('.')
+                && *segment != "."
+                && *segment != ".."
+                && segment.len() <= 128
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
+        && (workflow_path.ends_with(".yml") || workflow_path.ends_with(".yaml"))
+        && !git_ref.ends_with('/')
+}
+
+fn is_canonical_github_owner(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 39
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+}
+
+fn is_canonical_github_repository(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 100
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
 }
 
 fn is_reason_code(value: &str) -> bool {
@@ -3531,6 +6778,2282 @@ pub fn derive_work_unit_identity(
 mod tests {
     use super::*;
 
+    const VERIFIER_STORE_BYTES: &[u8] = br#"{"schema_version":1,"verifiers":[]}"#;
+    const BINDING_STORE_BYTES: &[u8] = br#"{"schema_version":1,"bindings":[]}"#;
+
+    fn protected_launcher_authority_context() -> ProtectedLauncherAuthorityContextV1 {
+        let digest = |character: char| format!("sha256:{}", character.to_string().repeat(64));
+        let mut runner_administrator = RunnerAdministratorAuthorityV1 {
+            schema_version: 1,
+            record_kind: RUNNER_ADMINISTRATOR_AUTHORITY.into(),
+            identity: String::new(),
+            authority_id: "ota-runner-administrator".into(),
+            authority_instance_id: URL_SAFE_NO_PAD.encode([1_u8; 32]),
+            administration_scope: "protected_self_hosted_runner".into(),
+        };
+        runner_administrator.identity =
+            runner_administrator_authority_v1_identity(&runner_administrator)
+                .expect("runner administrator identity");
+        let mut implementation_subject = ProtectedLauncherImplementationSubjectV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_LAUNCHER_IMPLEMENTATION_SUBJECT.into(),
+            identity: String::new(),
+            launcher_source_repository: "https://github.com/ota-run/authority-launcher".into(),
+            launcher_source_revision: "a".repeat(40),
+            core_source_repository: "https://github.com/ota-run/ota".into(),
+            core_source_revision: "b".repeat(40),
+            protocol_source_repository: "https://github.com/ota-run/authority-protocol".into(),
+            protocol_source_revision: "c".repeat(40),
+            launcher_build_identity: digest('1'),
+            core_build_identity: digest('2'),
+            launcher_artifact_identity: digest('3'),
+            ota_artifact_identity: digest('4'),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            minimum_core_version: "1.6.28".into(),
+            maximum_exclusive_core_version: "1.7.0".into(),
+            launcher_profile_identity: systemd_launcher_profile_identity(
+                &systemd_launcher_profile_v3(),
+            )
+            .expect("launcher profile identity"),
+            target: ProtectedLauncherImplementationTargetV1 {
+                environment: "self_hosted".into(),
+                os: "linux".into(),
+                architecture: "x86_64".into(),
+                execution_mode: "native".into(),
+                launcher_class: "systemd_protected_launcher_v3".into(),
+            },
+        };
+        implementation_subject.identity =
+            protected_launcher_implementation_subject_v1_identity(&implementation_subject)
+                .expect("implementation subject identity");
+        let mut context = ProtectedLauncherAuthorityContextV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_LAUNCHER_AUTHORITY_CONTEXT.into(),
+            identity: String::new(),
+            runner_administrator,
+            implementation_subject,
+        };
+        context.identity = protected_launcher_authority_context_v1_identity(&context)
+            .expect("authority context identity");
+        context
+    }
+
+    fn protected_descriptor(
+        role: ProtectedLauncherDescriptorRoleV1,
+        seed: u64,
+    ) -> ProtectedLauncherDescriptorV1 {
+        let (kind, access, owner_gid, mode, size) = match role {
+            ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket => (
+                ProtectedLauncherDescriptorKindV1::UnixStreamSocket,
+                ProtectedLauncherDescriptorAccessV1::ReadWrite,
+                995,
+                0o660,
+                0,
+            ),
+            ProtectedLauncherDescriptorRoleV1::VerifierStore
+            | ProtectedLauncherDescriptorRoleV1::BindingStore => (
+                ProtectedLauncherDescriptorKindV1::RegularFile,
+                ProtectedLauncherDescriptorAccessV1::ReadOnly,
+                0,
+                0o400,
+                match role {
+                    ProtectedLauncherDescriptorRoleV1::VerifierStore => {
+                        VERIFIER_STORE_BYTES.len() as u64
+                    }
+                    ProtectedLauncherDescriptorRoleV1::BindingStore => {
+                        BINDING_STORE_BYTES.len() as u64
+                    }
+                    _ => unreachable!(),
+                },
+            ),
+            ProtectedLauncherDescriptorRoleV1::InvocationCgroup => (
+                ProtectedLauncherDescriptorKindV1::Directory,
+                ProtectedLauncherDescriptorAccessV1::ReadOnly,
+                0,
+                0o755,
+                0,
+            ),
+        };
+        let mut descriptor = ProtectedLauncherDescriptorV1 {
+            schema_version: 1,
+            identity: String::new(),
+            role,
+            kind,
+            access,
+            device: seed,
+            inode: 1000 + seed,
+            owner_uid: 0,
+            owner_gid,
+            mode,
+            size,
+            content_identity: match role {
+                ProtectedLauncherDescriptorRoleV1::VerifierStore => Some(
+                    protected_launcher_store_content_identity_v1(role, VERIFIER_STORE_BYTES)
+                        .expect("verifier content identity"),
+                ),
+                ProtectedLauncherDescriptorRoleV1::BindingStore => Some(
+                    protected_launcher_store_content_identity_v1(role, BINDING_STORE_BYTES)
+                        .expect("binding content identity"),
+                ),
+                _ => None,
+            },
+        };
+        descriptor.identity = protected_launcher_descriptor_v1_identity(&descriptor)
+            .expect("protected descriptor identity");
+        descriptor
+    }
+
+    fn capability_observation_challenge() -> ProtectedLauncherCapabilityObservationChallengeV1 {
+        let nonce = [7_u8; 32];
+        let mut challenge = ProtectedLauncherCapabilityObservationChallengeV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_CHALLENGE.into(),
+            identity: String::new(),
+            workflow_run_id: "34153231585".into(),
+            workflow_run_attempt: "1".into(),
+            workflow_reference:
+                "ota-run/ota/.github/workflows/secret-delivery-oidc-endpoint-evidence.yml@refs/heads/1.6.28-implementation"
+                    .into(),
+            nonce_commitment:
+                protected_launcher_capability_observation_nonce_commitment_v1(&nonce)
+                    .expect("nonce commitment"),
+            issued_at_unix_seconds: 1_788_800_000,
+            expires_at_unix_seconds: 1_788_800_300,
+        };
+        challenge.identity =
+            protected_launcher_capability_observation_challenge_v1_identity(&challenge)
+                .expect("challenge identity");
+        challenge
+    }
+
+    fn capability_projection_verifier() -> ProtectedLauncherCapabilityProjectionVerifierV1 {
+        let public_key = "A".repeat(43);
+        let mut verifier = ProtectedLauncherCapabilityProjectionVerifierV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_LAUNCHER_CAPABILITY_PROJECTION_VERIFIER.into(),
+            identity: String::new(),
+            key_identity: protected_launcher_capability_projection_key_identity_v1(&public_key)
+                .expect("key identity"),
+            public_key,
+            key_usage: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROJECTION_KEY_USAGE_V1.into(),
+            signature_domain: std::str::from_utf8(
+                PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1,
+            )
+            .expect("signature domain")
+            .into(),
+        };
+        verifier.identity =
+            protected_launcher_capability_projection_verifier_v1_identity(&verifier)
+                .expect("verifier identity");
+        verifier
+    }
+
+    fn secret_delivery_binding_bundle_verifier() -> ProtectedSecretDeliveryBindingBundleVerifierV1 {
+        let public_key = "A".repeat(43);
+        let mut verifier = ProtectedSecretDeliveryBindingBundleVerifierV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_VERIFIER.into(),
+            identity: String::new(),
+            key_identity: protected_secret_delivery_binding_bundle_key_identity_v1(&public_key)
+                .expect("key identity"),
+            public_key,
+            key_usage: PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_KEY_USAGE_V1.into(),
+            signature_domain: std::str::from_utf8(
+                PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_SIGNATURE_DOMAIN_V1,
+            )
+            .expect("signature domain")
+            .into(),
+        };
+        verifier.identity =
+            protected_secret_delivery_binding_bundle_verifier_v1_identity(&verifier)
+                .expect("verifier identity");
+        verifier
+    }
+
+    fn secret_delivery_binding_bundle() -> ProtectedSecretDeliveryBindingBundleV1 {
+        let payload = URL_SAFE_NO_PAD.encode(br#"{\"schema_version\":1,\"bindings\":[]}"#);
+        let payload_bytes = URL_SAFE_NO_PAD.decode(&payload).expect("payload bytes");
+        let verifier = secret_delivery_binding_bundle_verifier();
+        let mut bundle = ProtectedSecretDeliveryBindingBundleV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE.into(),
+            identity: String::new(),
+            authority_id: "ota-secret-delivery".into(),
+            generation: 1,
+            issued_at_unix_seconds: 1_788_800_000,
+            expires_at_unix_seconds: 1_788_803_600,
+            verifier_identity: verifier.identity,
+            payload,
+            payload_identity: protected_secret_delivery_binding_bundle_payload_v1_identity(
+                &payload_bytes,
+            )
+            .expect("payload identity"),
+            signature: "A".repeat(86),
+        };
+        bundle.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&bundle).expect("bundle identity");
+        bundle
+    }
+
+    fn secret_delivery_verifier_store() -> ProtectedSecretDeliveryVerifierStoreV1 {
+        let bundle = secret_delivery_binding_bundle();
+        let mut store = ProtectedSecretDeliveryVerifierStoreV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SECRET_DELIVERY_VERIFIER_STORE.into(),
+            identity: String::new(),
+            authority_id: bundle.authority_id.clone(),
+            generation: 1,
+            not_before_unix_seconds: bundle.issued_at_unix_seconds,
+            not_after_unix_seconds: bundle.expires_at_unix_seconds,
+            verifiers: vec![secret_delivery_binding_bundle_verifier()],
+            active_binding_bundle_identity: bundle.identity,
+            active_binding_bundle_generation: bundle.generation,
+        };
+        store.identity =
+            protected_secret_delivery_verifier_store_v1_identity(&store).expect("store identity");
+        store
+    }
+
+    fn capability_observation_projection() -> ProtectedLauncherCapabilityObservationProjectionV1 {
+        let challenge = capability_observation_challenge();
+        let verifier = capability_projection_verifier();
+        let payload = ProtectedLauncherCapabilityObservationProjectionPayloadV1 {
+            schema_version: 1,
+            evidence_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION.into(),
+            challenge_identity: challenge.identity,
+            derivation: "verified".into(),
+            target: ProtectedLauncherCapabilityObservationTargetV1 {
+                environment: "self_hosted".into(),
+                os: "linux".into(),
+                architecture: "x64".into(),
+            },
+            capability_class: "systemd_protected_launcher_v4".into(),
+            runner_version: "2.337.0".into(),
+            signing_key_identity: verifier.key_identity,
+        };
+        ProtectedLauncherCapabilityObservationProjectionV1 {
+            projection_identity: protected_launcher_capability_observation_projection_v1_identity(
+                &payload,
+            )
+            .expect("projection identity"),
+            payload,
+            signature: "A".repeat(86),
+        }
+    }
+
+    fn capability_observation_invocation() -> LauncherInvocationRequestV1 {
+        LauncherInvocationRequestV1 {
+            message_kind: LAUNCHER_INVOCATION_REQUEST.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            authority_id: "secret-delivery".into(),
+            ota_arguments: vec!["run".into(), "publish".into()],
+            repository_path: "/srv/ota/repository".into(),
+        }
+    }
+
+    fn capability_observation_request() -> ProtectedLauncherCapabilityObservationRequestV1 {
+        let nonce = [7_u8; 32];
+        let invocation = capability_observation_invocation();
+        let mut request = ProtectedLauncherCapabilityObservationRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_REQUEST.into(),
+            identity: String::new(),
+            challenge: capability_observation_challenge(),
+            nonce: URL_SAFE_NO_PAD.encode(nonce),
+            runner_version: "2.337.0".into(),
+            expected_launcher_request_identity: launcher_invocation_request_identity(&invocation)
+                .expect("invocation identity"),
+        };
+        request.identity = protected_launcher_capability_observation_request_v1_identity(&request)
+            .expect("request identity");
+        request
+    }
+
+    fn capability_observation_probe_request() -> ProtectedLauncherCapabilityObservationProbeRequestV1
+    {
+        let mut request = ProtectedLauncherCapabilityObservationProbeRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_PROBE_REQUEST.into(),
+            identity: String::new(),
+            invocation: capability_observation_invocation(),
+            observation: capability_observation_request(),
+        };
+        request.identity =
+            protected_launcher_capability_observation_probe_request_v1_identity(&request)
+                .expect("probe request identity");
+        request
+    }
+
+    fn capability_observation_signing_request()
+    -> ProtectedLauncherCapabilityObservationSigningRequestV1 {
+        let payload = capability_observation_projection().payload;
+        let projection_identity =
+            protected_launcher_capability_observation_projection_v1_identity(&payload)
+                .expect("projection identity");
+        let mut request = ProtectedLauncherCapabilityObservationSigningRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_REQUEST.into(),
+            identity: String::new(),
+            producer_binding_identity: format!("sha256:{}", "1".repeat(64)),
+            verifier_identity: capability_projection_verifier().identity,
+            protected_capability_identity: format!("sha256:{}", "2".repeat(64)),
+            payload,
+            projection_identity,
+        };
+        request.identity =
+            protected_launcher_capability_observation_signing_request_v1_identity(&request)
+                .expect("signing request identity");
+        request
+    }
+
+    fn secret_delivery_startup_continuation() -> LauncherStartupContinuationV1 {
+        let mut continuation = LauncherStartupContinuationV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: LAUNCHER_STARTUP_CONTINUATION.into(),
+            invocation_id: "secret-delivery-transaction".into(),
+            launcher_request_identity: launcher_invocation_request_identity(
+                &capability_observation_invocation(),
+            )
+            .expect("launcher request identity"),
+            child_process_identity: format!("sha256:{}", "1".repeat(64)),
+            working_directory_identity: format!("sha256:{}", "2".repeat(64)),
+            process_posture_identity: format!("sha256:{}", "3".repeat(64)),
+            principal_mapping_identity: format!("sha256:{}", "4".repeat(64)),
+        };
+        continuation.identity =
+            launcher_startup_continuation_identity(&continuation).expect("continuation identity");
+        continuation
+    }
+
+    fn secret_delivery_transaction_binding_request()
+    -> ProtectedLauncherSecretDeliveryTransactionBindingRequestV1 {
+        let continuation = secret_delivery_startup_continuation();
+        let mut request = ProtectedLauncherSecretDeliveryTransactionBindingRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST.into(),
+            identity: String::new(),
+            launcher_request_identity: continuation.launcher_request_identity,
+            observation: capability_observation_request(),
+            secret_transaction_candidate_identity: format!("sha256:{}", "3".repeat(64)),
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("session identity"),
+        };
+        request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v1_identity(&request)
+                .expect("binding request identity");
+        request
+    }
+
+    fn secret_delivery_transaction_binding_response(
+        request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+        evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingResponseV1 {
+        let mut binding = ProtectedLauncherSecretDeliveryTransactionBindingV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            protected_capability_identity: evidence.protected_capability.identity.clone(),
+            secret_transaction_candidate_identity: request
+                .secret_transaction_candidate_identity
+                .clone(),
+            observation_request_identity: request.observation.identity.clone(),
+            projection_identity: evidence.projection.projection_identity.clone(),
+            verifier_identity: evidence.verifier.identity.clone(),
+            installation_evidence_identity: evidence.installation_evidence_identity.clone(),
+            expires_at_unix_seconds: request.observation.challenge.expires_at_unix_seconds,
+        };
+        binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v1_identity(&binding)
+                .expect("binding identity");
+        ProtectedLauncherSecretDeliveryTransactionBindingResponseV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE.into(),
+            request_identity: request.identity.clone(),
+            binding,
+            projection: evidence.projection.clone(),
+        }
+    }
+
+    fn secret_delivery_transaction_binding_evidence()
+    -> ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1 {
+        let request = secret_delivery_transaction_binding_request();
+        let mut protected_capability = protected_capability();
+        protected_capability.launcher_request_identity = request.launcher_request_identity.clone();
+        protected_capability.identity =
+            protected_launcher_capability_v1_identity(&protected_capability)
+                .expect("protected capability identity");
+        ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1 {
+            protected_capability,
+            projection: capability_observation_projection(),
+            verifier: capability_projection_verifier(),
+            installation_evidence_identity: format!("sha256:{}", "9".repeat(64)),
+        }
+    }
+
+    fn authority_snapshot_request() -> ProtectedAuthoritySnapshotRequestV1 {
+        let continuation = secret_delivery_startup_continuation();
+        let nonce = [8_u8; 32];
+        let mut challenge = ProtectedAuthoritySnapshotChallengeV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_AUTHORITY_SNAPSHOT_CHALLENGE.into(),
+            identity: String::new(),
+            nonce_commitment: protected_authority_snapshot_nonce_commitment_v1(&nonce)
+                .expect("snapshot nonce commitment"),
+            issued_at_unix_seconds: 1_788_800_000,
+            expires_at_unix_seconds: 1_788_800_300,
+        };
+        challenge.identity = protected_authority_snapshot_challenge_v1_identity(&challenge)
+            .expect("snapshot challenge identity");
+        let mut request = ProtectedAuthoritySnapshotRequestV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_AUTHORITY_SNAPSHOT_REQUEST.into(),
+            identity: String::new(),
+            challenge,
+            nonce: URL_SAFE_NO_PAD.encode(nonce),
+            launcher_request_identity: continuation.launcher_request_identity,
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("snapshot session identity"),
+            contract_identity: format!("sha256:{}", "a".repeat(64)),
+            selected_execution_graph_identity: format!("sha256:{}", "b".repeat(64)),
+        };
+        request.identity = protected_authority_snapshot_request_v1_identity(&request)
+            .expect("snapshot request identity");
+        request
+    }
+
+    fn authority_snapshot_response(
+        request: &ProtectedAuthoritySnapshotRequestV1,
+    ) -> ProtectedAuthoritySnapshotResponseV1 {
+        let verifier_store = secret_delivery_verifier_store();
+        let binding_bundle = secret_delivery_binding_bundle();
+        let verifier_store_bytes = serde_json::to_vec(&verifier_store).expect("verifier bytes");
+        let binding_store_bytes = serde_json::to_vec(&binding_bundle).expect("binding bytes");
+        let mut verifier_store_descriptor =
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::VerifierStore, 17);
+        verifier_store_descriptor.size = verifier_store_bytes.len() as u64;
+        verifier_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                &verifier_store_bytes,
+            )
+            .expect("verifier content identity"),
+        );
+        verifier_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&verifier_store_descriptor)
+                .expect("verifier descriptor identity");
+        let mut binding_store_descriptor =
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::BindingStore, 18);
+        binding_store_descriptor.size = binding_store_bytes.len() as u64;
+        binding_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::BindingStore,
+                &binding_store_bytes,
+            )
+            .expect("binding content identity"),
+        );
+        binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&binding_store_descriptor)
+                .expect("binding descriptor identity");
+        let payload = ProtectedAuthoritySnapshotPayloadV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_AUTHORITY_SNAPSHOT.into(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            contract_identity: request.contract_identity.clone(),
+            selected_execution_graph_identity: request.selected_execution_graph_identity.clone(),
+            verifier_store_descriptor,
+            binding_store_descriptor,
+            verifier_store,
+            binding_bundle,
+            verifier_store_bytes: URL_SAFE_NO_PAD.encode(verifier_store_bytes),
+            binding_store_bytes: URL_SAFE_NO_PAD.encode(binding_store_bytes),
+        };
+        let mut response = ProtectedAuthoritySnapshotResponseV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            protected_snapshot_identity: protected_authority_snapshot_payload_v1_identity(&payload)
+                .expect("snapshot identity"),
+            payload,
+        };
+        response.identity = protected_authority_snapshot_response_v1_identity(&response)
+            .expect("snapshot response identity");
+        response
+    }
+
+    fn authority_snapshot_request_v2() -> ProtectedAuthoritySnapshotRequestV2 {
+        let request = authority_snapshot_request();
+        let mut v2 = ProtectedAuthoritySnapshotRequestV2 {
+            schema_version: 2,
+            message_kind: PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_V2.into(),
+            identity: String::new(),
+            challenge: request.challenge,
+            nonce: request.nonce,
+            launcher_request_identity: request.launcher_request_identity,
+            startup_continuation_identity: request.startup_continuation_identity,
+            session_identity: request.session_identity,
+            contract_identity: request.contract_identity,
+            selected_execution_graph_identity: request.selected_execution_graph_identity,
+        };
+        v2.identity = protected_authority_snapshot_request_v2_identity(&v2)
+            .expect("V2 snapshot request identity");
+        v2
+    }
+
+    fn authority_snapshot_response_v2(
+        request: &ProtectedAuthoritySnapshotRequestV2,
+    ) -> ProtectedAuthoritySnapshotResponseV2 {
+        let v1 = authority_snapshot_request();
+        let v1_response = authority_snapshot_response(&v1);
+        let verifier_store_bytes = serde_jcs::to_vec(&v1_response.payload.verifier_store)
+            .expect("canonical verifier store bytes");
+        let binding_store_bytes = serde_jcs::to_vec(&v1_response.payload.binding_bundle)
+            .expect("canonical binding store bytes");
+        let mut verifier_store_descriptor =
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::VerifierStore, 17);
+        verifier_store_descriptor.size = verifier_store_bytes.len() as u64;
+        verifier_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                &verifier_store_bytes,
+            )
+            .expect("V2 verifier store content identity"),
+        );
+        verifier_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&verifier_store_descriptor)
+                .expect("V2 verifier descriptor identity");
+        let mut binding_store_descriptor =
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::BindingStore, 18);
+        binding_store_descriptor.size = binding_store_bytes.len() as u64;
+        binding_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::BindingStore,
+                &binding_store_bytes,
+            )
+            .expect("V2 binding store content identity"),
+        );
+        binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&binding_store_descriptor)
+                .expect("V2 binding descriptor identity");
+        let payload = ProtectedAuthoritySnapshotPayloadV2 {
+            schema_version: 2,
+            record_kind: PROTECTED_AUTHORITY_SNAPSHOT_V2.into(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            contract_identity: request.contract_identity.clone(),
+            selected_execution_graph_identity: request.selected_execution_graph_identity.clone(),
+            verifier_store_descriptor,
+            binding_store_descriptor,
+            verifier_store_bytes: URL_SAFE_NO_PAD.encode(verifier_store_bytes),
+            binding_store_bytes: URL_SAFE_NO_PAD.encode(binding_store_bytes),
+        };
+        let mut response = ProtectedAuthoritySnapshotResponseV2 {
+            schema_version: 2,
+            message_kind: PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_V2.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            protected_snapshot_identity: protected_authority_snapshot_payload_v2_identity(&payload)
+                .expect("V2 snapshot identity"),
+            payload,
+        };
+        response.identity = protected_authority_snapshot_response_v2_identity(&response)
+            .expect("V2 snapshot response identity");
+        response
+    }
+
+    fn reidentify_authority_snapshot_response(response: &mut ProtectedAuthoritySnapshotResponseV1) {
+        response.payload.verifier_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&response.payload.verifier_store_descriptor)
+                .expect("reidentified verifier descriptor");
+        response.payload.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&response.payload.binding_store_descriptor)
+                .expect("reidentified binding descriptor");
+        response.protected_snapshot_identity =
+            protected_authority_snapshot_payload_v1_identity(&response.payload)
+                .expect("reidentified snapshot");
+        response.identity = protected_authority_snapshot_response_v1_identity(response)
+            .expect("reidentified snapshot response");
+    }
+
+    fn reidentify_authority_snapshot_response_v2(
+        response: &mut ProtectedAuthoritySnapshotResponseV2,
+    ) {
+        let verifier_bytes = URL_SAFE_NO_PAD
+            .decode(response.payload.verifier_store_bytes.as_bytes())
+            .expect("V2 verifier bytes");
+        let binding_bytes = URL_SAFE_NO_PAD
+            .decode(response.payload.binding_store_bytes.as_bytes())
+            .expect("V2 binding bytes");
+        response.payload.verifier_store_descriptor.size = verifier_bytes.len() as u64;
+        response.payload.binding_store_descriptor.size = binding_bytes.len() as u64;
+        response.payload.verifier_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                &verifier_bytes,
+            )
+            .expect("V2 verifier content identity"),
+        );
+        response.payload.binding_store_descriptor.content_identity = Some(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::BindingStore,
+                &binding_bytes,
+            )
+            .expect("V2 binding content identity"),
+        );
+        response.payload.verifier_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&response.payload.verifier_store_descriptor)
+                .expect("reidentified V2 verifier descriptor");
+        response.payload.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&response.payload.binding_store_descriptor)
+                .expect("reidentified V2 binding descriptor");
+        response.protected_snapshot_identity =
+            protected_authority_snapshot_payload_v2_identity(&response.payload)
+                .expect("reidentified V2 snapshot");
+        response.identity = protected_authority_snapshot_response_v2_identity(response)
+            .expect("reidentified V2 snapshot response");
+    }
+
+    fn reidentify_authority_snapshot_response_v2_unchecked(
+        response: &mut ProtectedAuthoritySnapshotResponseV2,
+    ) {
+        response.protected_snapshot_identity =
+            protected_authority_snapshot_payload_v2_identity_validated(&response.payload)
+                .expect("unchecked V2 snapshot identity");
+        response.identity = protected_authority_snapshot_response_v2_identity_validated(response)
+            .expect("unchecked V2 snapshot response identity");
+    }
+
+    fn secret_delivery_transaction_binding_request_v2(
+        snapshot: &ProtectedAuthoritySnapshotResponseV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingRequestV2 {
+        let continuation = secret_delivery_startup_continuation();
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+        let mut request = ProtectedLauncherSecretDeliveryTransactionBindingRequestV2 {
+            schema_version: 2,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V2.into(),
+            identity: String::new(),
+            launcher_request_identity: continuation.launcher_request_identity,
+            observation: capability_observation_request(),
+            secret_transaction_candidate_identity: format!("sha256:{}", "c".repeat(64)),
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("v2 session identity"),
+            same_child_capability_prelude_identity: prelude.identity,
+            protected_snapshot_identity: snapshot.protected_snapshot_identity.clone(),
+        };
+        request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v2_identity(&request)
+                .expect("v2 request identity");
+        request
+    }
+
+    fn same_child_capability_prelude(
+        continuation: &LauncherStartupContinuationV1,
+        evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    ) -> ProtectedSameChildCapabilityPreludeV1 {
+        let observation = capability_observation_request();
+        let mut prelude = ProtectedSameChildCapabilityPreludeV1 {
+            schema_version: 1,
+            record_kind: PROTECTED_SAME_CHILD_CAPABILITY_PRELUDE.into(),
+            identity: String::new(),
+            observation_request_identity: observation.identity,
+            projection_identity: evidence.projection.projection_identity.clone(),
+            protected_capability_identity: evidence.protected_capability.identity.clone(),
+            verifier_identity: evidence.verifier.identity.clone(),
+            installation_evidence_identity: evidence.installation_evidence_identity.clone(),
+            launcher_request_identity: continuation.launcher_request_identity.clone(),
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("prelude session identity"),
+            expires_at_unix_seconds: observation.challenge.expires_at_unix_seconds,
+        };
+        prelude.identity = protected_same_child_capability_prelude_v1_identity(&prelude)
+            .expect("same-child prelude identity");
+        prelude
+    }
+
+    fn secret_delivery_transaction_binding_response_v2(
+        request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV2,
+        evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingResponseV2 {
+        let mut binding = ProtectedLauncherSecretDeliveryTransactionBindingV2 {
+            schema_version: 2,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V2.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            protected_capability_identity: evidence.protected_capability.identity.clone(),
+            secret_transaction_candidate_identity: request
+                .secret_transaction_candidate_identity
+                .clone(),
+            observation_request_identity: request.observation.identity.clone(),
+            projection_identity: evidence.projection.projection_identity.clone(),
+            verifier_identity: evidence.verifier.identity.clone(),
+            installation_evidence_identity: evidence.installation_evidence_identity.clone(),
+            expires_at_unix_seconds: request.observation.challenge.expires_at_unix_seconds,
+        };
+        binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v2_identity(&binding)
+                .expect("v2 binding identity");
+        ProtectedLauncherSecretDeliveryTransactionBindingResponseV2 {
+            schema_version: 2,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V2.into(),
+            request_identity: request.identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            binding,
+            projection: evidence.projection.clone(),
+        }
+    }
+
+    fn secret_delivery_transaction_binding_request_v3(
+        snapshot: &ProtectedAuthoritySnapshotResponseV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingRequestV3 {
+        let continuation = secret_delivery_startup_continuation();
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+        let mut request = ProtectedLauncherSecretDeliveryTransactionBindingRequestV3 {
+            schema_version: 3,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V3.into(),
+            identity: String::new(),
+            launcher_request_identity: continuation.launcher_request_identity,
+            observation: capability_observation_request(),
+            secret_transaction_candidate_identity: format!("sha256:{}", "c".repeat(64)),
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("v3 session identity"),
+            same_child_capability_prelude_identity: prelude.identity,
+            protected_snapshot_identity: snapshot.protected_snapshot_identity.clone(),
+            transport_dependency_record_identity: format!("sha256:{}", "d".repeat(64)),
+        };
+        request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v3_identity(&request)
+                .expect("v3 request identity");
+        request
+    }
+
+    fn secret_delivery_transaction_binding_response_v3(
+        request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+        evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingResponseV3 {
+        let mut binding = ProtectedLauncherSecretDeliveryTransactionBindingV3 {
+            schema_version: 3,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V3.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            protected_capability_identity: evidence.protected_capability.identity.clone(),
+            secret_transaction_candidate_identity: request
+                .secret_transaction_candidate_identity
+                .clone(),
+            observation_request_identity: request.observation.identity.clone(),
+            projection_identity: evidence.projection.projection_identity.clone(),
+            verifier_identity: evidence.verifier.identity.clone(),
+            installation_evidence_identity: evidence.installation_evidence_identity.clone(),
+            expires_at_unix_seconds: request.observation.challenge.expires_at_unix_seconds,
+            transport_dependency_record_identity: request
+                .transport_dependency_record_identity
+                .clone(),
+        };
+        binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v3_identity(&binding)
+                .expect("v3 binding identity");
+        ProtectedLauncherSecretDeliveryTransactionBindingResponseV3 {
+            schema_version: 3,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V3.into(),
+            request_identity: request.identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            binding,
+            projection: evidence.projection.clone(),
+        }
+    }
+
+    fn secret_delivery_transaction_binding_request_v4(
+        snapshot: &ProtectedAuthoritySnapshotResponseV2,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingRequestV4 {
+        let continuation = secret_delivery_startup_continuation();
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+        let mut request = ProtectedLauncherSecretDeliveryTransactionBindingRequestV4 {
+            schema_version: 4,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_V4.into(),
+            identity: String::new(),
+            launcher_request_identity: continuation.launcher_request_identity,
+            observation: capability_observation_request(),
+            secret_transaction_candidate_identity: format!("sha256:{}", "c".repeat(64)),
+            startup_continuation_identity: continuation.identity.clone(),
+            session_identity: protected_launcher_secret_delivery_transaction_session_v1_identity(
+                continuation.identity.as_str(),
+            )
+            .expect("V4 session identity"),
+            same_child_capability_prelude_identity: prelude.identity,
+            protected_snapshot_identity: snapshot.protected_snapshot_identity.clone(),
+            protected_snapshot_schema_version: snapshot.payload.schema_version,
+            protected_snapshot_record_kind: snapshot.payload.record_kind.clone(),
+            transport_dependency_record_identity: format!("sha256:{}", "d".repeat(64)),
+        };
+        request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v4_identity(&request)
+                .expect("V4 request identity");
+        request
+    }
+
+    fn secret_delivery_transaction_binding_response_v4(
+        request: &ProtectedLauncherSecretDeliveryTransactionBindingRequestV4,
+        evidence: &ProtectedLauncherSecretDeliveryTransactionBindingEvidenceV1,
+    ) -> ProtectedLauncherSecretDeliveryTransactionBindingResponseV4 {
+        let mut binding = ProtectedLauncherSecretDeliveryTransactionBindingV4 {
+            schema_version: 4,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_V4.into(),
+            identity: String::new(),
+            request_identity: request.identity.clone(),
+            launcher_request_identity: request.launcher_request_identity.clone(),
+            startup_continuation_identity: request.startup_continuation_identity.clone(),
+            session_identity: request.session_identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            protected_snapshot_schema_version: request.protected_snapshot_schema_version,
+            protected_snapshot_record_kind: request.protected_snapshot_record_kind.clone(),
+            protected_capability_identity: evidence.protected_capability.identity.clone(),
+            secret_transaction_candidate_identity: request
+                .secret_transaction_candidate_identity
+                .clone(),
+            observation_request_identity: request.observation.identity.clone(),
+            projection_identity: evidence.projection.projection_identity.clone(),
+            verifier_identity: evidence.verifier.identity.clone(),
+            installation_evidence_identity: evidence.installation_evidence_identity.clone(),
+            expires_at_unix_seconds: request.observation.challenge.expires_at_unix_seconds,
+            transport_dependency_record_identity: request
+                .transport_dependency_record_identity
+                .clone(),
+        };
+        binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v4_identity(&binding)
+                .expect("V4 binding identity");
+        ProtectedLauncherSecretDeliveryTransactionBindingResponseV4 {
+            schema_version: 4,
+            message_kind: PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_RESPONSE_V4.into(),
+            request_identity: request.identity.clone(),
+            same_child_capability_prelude_identity: request
+                .same_child_capability_prelude_identity
+                .clone(),
+            protected_snapshot_identity: request.protected_snapshot_identity.clone(),
+            protected_snapshot_schema_version: request.protected_snapshot_schema_version,
+            protected_snapshot_record_kind: request.protected_snapshot_record_kind.clone(),
+            binding,
+            projection: evidence.projection.clone(),
+        }
+    }
+
+    #[test]
+    fn secret_delivery_authority_bundle_is_closed_current_and_domain_separated() {
+        let store = secret_delivery_verifier_store();
+        let bundle = secret_delivery_binding_bundle();
+        reconcile_protected_secret_delivery_authority_bundle_v1(
+            &store,
+            &bundle,
+            bundle.issued_at_unix_seconds,
+        )
+        .expect("current bundle reconciles");
+        assert_ne!(
+            store.identity, bundle.identity,
+            "store and bundle domains differ"
+        );
+        assert_ne!(
+            bundle.identity, bundle.payload_identity,
+            "bundle binds payload separately"
+        );
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_signature_message_v1(bundle.identity.as_str())
+                .expect("signature message"),
+            b"ota.protected-secret-delivery.binding-bundle-signature.v1\0sha256:5e456d824eafbde3b1a538493ba7c139013d9756a4b4c821772bf353f64533e5"
+                .to_vec()
+        );
+
+        let mut unknown_store = serde_json::to_value(&store).expect("store JSON");
+        unknown_store
+            .as_object_mut()
+            .expect("store object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSecretDeliveryVerifierStoreV1>(unknown_store)
+                .is_err()
+        );
+        let mut unknown_bundle = serde_json::to_value(&bundle).expect("bundle JSON");
+        unknown_bundle
+            .as_object_mut()
+            .expect("bundle object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSecretDeliveryBindingBundleV1>(unknown_bundle)
+                .is_err()
+        );
+        let mut unknown_verifier =
+            serde_json::to_value(&store.verifiers[0]).expect("verifier JSON");
+        unknown_verifier
+            .as_object_mut()
+            .expect("verifier object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSecretDeliveryBindingBundleVerifierV1>(
+                unknown_verifier
+            )
+            .is_err()
+        );
+
+        let mut stale = store.clone();
+        stale.active_binding_bundle_identity = format!("sha256:{}", "f".repeat(64));
+        stale.identity = protected_secret_delivery_verifier_store_v1_identity(&stale)
+            .expect("stale store remains structurally valid");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &stale,
+                &bundle,
+                bundle.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut substituted = bundle.clone();
+        substituted.payload =
+            URL_SAFE_NO_PAD.encode(br#"{\"schema_version\":1,\"bindings\":[\"other\"]}"#);
+        let payload = URL_SAFE_NO_PAD
+            .decode(&substituted.payload)
+            .expect("substituted payload");
+        substituted.payload_identity =
+            protected_secret_delivery_binding_bundle_payload_v1_identity(&payload)
+                .expect("substituted payload identity");
+        substituted.identity = protected_secret_delivery_binding_bundle_v1_identity(&substituted)
+            .expect("substituted bundle identity");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &substituted,
+                substituted.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut duplicate = store.clone();
+        duplicate.verifiers.push(duplicate.verifiers[0].clone());
+        assert_eq!(
+            protected_secret_delivery_verifier_store_v1_identity(&duplicate),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &bundle,
+                bundle.expires_at_unix_seconds + 1,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut different_authority = bundle.clone();
+        different_authority.authority_id = "other-authority".into();
+        different_authority.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&different_authority)
+                .expect("different authority bundle remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &different_authority,
+                different_authority.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut different_generation = bundle.clone();
+        different_generation.generation = 2;
+        different_generation.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&different_generation)
+                .expect("different generation bundle remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &different_generation,
+                different_generation.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut different_verifier = bundle.clone();
+        different_verifier.verifier_identity = format!("sha256:{}", "e".repeat(64));
+        different_verifier.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&different_verifier)
+                .expect("different verifier bundle remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &store,
+                &different_verifier,
+                different_verifier.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut future_store = store.clone();
+        future_store.not_before_unix_seconds += 1;
+        future_store.identity = protected_secret_delivery_verifier_store_v1_identity(&future_store)
+            .expect("future store remains structural");
+        assert_eq!(
+            reconcile_protected_secret_delivery_authority_bundle_v1(
+                &future_store,
+                &bundle,
+                bundle.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        for payload in [
+            Vec::new(),
+            vec![b'a'; MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1 + 1],
+        ] {
+            assert_eq!(
+                protected_secret_delivery_binding_bundle_payload_v1_identity(&payload),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let maximum_payload =
+            vec![b'a'; MAX_PROTECTED_SECRET_DELIVERY_BINDING_BUNDLE_PAYLOAD_BYTES_V1];
+        assert!(
+            protected_secret_delivery_binding_bundle_payload_v1_identity(&maximum_payload).is_ok(),
+            "the documented payload maximum remains admissible"
+        );
+        let mut maximum_bundle = bundle.clone();
+        maximum_bundle.payload = URL_SAFE_NO_PAD.encode(&maximum_payload);
+        maximum_bundle.payload_identity =
+            protected_secret_delivery_binding_bundle_payload_v1_identity(&maximum_payload)
+                .expect("maximum payload identity");
+        maximum_bundle.identity =
+            protected_secret_delivery_binding_bundle_v1_identity(&maximum_bundle)
+                .expect("maximum payload bundle fits protected store");
+        assert!(
+            serde_jcs::to_vec(&maximum_bundle)
+                .expect("maximum bundle JCS")
+                .len()
+                <= MAX_PROTECTED_LAUNCHER_STORE_BYTES_V1
+        );
+
+        let mut wrong_usage = store.verifiers[0].clone();
+        wrong_usage.key_usage = "other_usage".into();
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_verifier_v1_identity(&wrong_usage),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut wrong_domain = store.verifiers[0].clone();
+        wrong_domain.signature_domain = "other-domain".into();
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_verifier_v1_identity(&wrong_domain),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        assert_eq!(
+            protected_secret_delivery_binding_bundle_key_identity_v1(
+                store.verifiers[0].public_key.as_str()
+            )
+            .expect("key vector"),
+            "sha256:d23ea59f41edf874e937c2d0bccd34e41e1e56c3dd316b85f59f84449af65c62"
+        );
+        assert_eq!(
+            store.verifiers[0].identity,
+            "sha256:9dfb908d864f1125ed090e6fa58915956e1bf8fc60578f71fe4bd35870fa9123"
+        );
+        assert_eq!(
+            bundle.payload_identity,
+            "sha256:37db448e7f68710c266aff6db57ca4550785aa470e68aa11d6eb72ca30f4095b"
+        );
+        assert_eq!(
+            bundle.identity,
+            "sha256:5e456d824eafbde3b1a538493ba7c139013d9756a4b4c821772bf353f64533e5"
+        );
+        assert_eq!(
+            store.identity,
+            "sha256:1e791ee512dd267a64deaf7cbc395abc75254e251c7538514d26662db5af0ea9"
+        );
+    }
+
+    #[test]
+    fn protected_launcher_authority_context_is_closed_and_domain_separated() {
+        let context = protected_launcher_authority_context();
+        assert_eq!(
+            protected_launcher_authority_context_v1_identity(&context).as_deref(),
+            Ok(context.identity.as_str())
+        );
+        assert_ne!(
+            context.identity, context.runner_administrator.identity,
+            "outer context identity must not alias administrator identity"
+        );
+        assert_ne!(
+            context.identity, context.implementation_subject.identity,
+            "outer context identity must not alias implementation identity"
+        );
+
+        let mut unknown_context = serde_json::to_value(&context).expect("context JSON");
+        unknown_context
+            .as_object_mut()
+            .expect("context object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherAuthorityContextV1>(unknown_context).is_err()
+        );
+        let mut unknown_administrator =
+            serde_json::to_value(&context.runner_administrator).expect("administrator JSON");
+        unknown_administrator
+            .as_object_mut()
+            .expect("administrator object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<RunnerAdministratorAuthorityV1>(unknown_administrator)
+                .is_err()
+        );
+        let mut unknown_subject =
+            serde_json::to_value(&context.implementation_subject).expect("subject JSON");
+        unknown_subject
+            .as_object_mut()
+            .expect("subject object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherImplementationSubjectV1>(unknown_subject)
+                .is_err()
+        );
+        let mut unknown_target =
+            serde_json::to_value(&context.implementation_subject.target).expect("target JSON");
+        unknown_target
+            .as_object_mut()
+            .expect("target object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherImplementationTargetV1>(unknown_target)
+                .is_err()
+        );
+
+        let mut changed_administrator = context.clone();
+        changed_administrator.runner_administrator.authority_id = "another-administrator".into();
+        changed_administrator.runner_administrator.identity =
+            runner_administrator_authority_v1_identity(&changed_administrator.runner_administrator)
+                .expect("changed administrator identity");
+        assert_ne!(
+            protected_launcher_authority_context_v1_identity(&changed_administrator)
+                .expect("changed context identity"),
+            context.identity
+        );
+
+        let mut noncanonical_administrator = context.runner_administrator.clone();
+        noncanonical_administrator.authority_id = "Runner-Administrator".into();
+        assert_eq!(
+            runner_administrator_authority_v1_identity(&noncanonical_administrator),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed_instance = context.clone();
+        changed_instance.runner_administrator.authority_instance_id =
+            URL_SAFE_NO_PAD.encode([2_u8; 32]);
+        changed_instance.runner_administrator.identity =
+            runner_administrator_authority_v1_identity(&changed_instance.runner_administrator)
+                .expect("changed authority instance identity");
+        assert_ne!(
+            protected_launcher_authority_context_v1_identity(&changed_instance)
+                .expect("changed authority context identity"),
+            context.identity
+        );
+        for malformed_instance in [
+            URL_SAFE_NO_PAD.encode([0_u8; 32]),
+            URL_SAFE_NO_PAD.encode([1_u8; 31]),
+            URL_SAFE_NO_PAD.encode([1_u8; 33]),
+            format!("{}=", URL_SAFE_NO_PAD.encode([1_u8; 32])),
+            format!("*{}", "A".repeat(42)),
+            "B".repeat(43),
+        ] {
+            let mut malformed_authority = context.runner_administrator.clone();
+            malformed_authority.authority_instance_id = malformed_instance;
+            assert_eq!(
+                runner_administrator_authority_v1_identity(&malformed_authority),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        let mut changed_subject = context.clone();
+        changed_subject.implementation_subject.ota_artifact_identity =
+            format!("sha256:{}", "9".repeat(64));
+        changed_subject.implementation_subject.identity =
+            protected_launcher_implementation_subject_v1_identity(
+                &changed_subject.implementation_subject,
+            )
+            .expect("changed subject identity");
+        assert_ne!(
+            protected_launcher_authority_context_v1_identity(&changed_subject)
+                .expect("changed context identity"),
+            context.identity
+        );
+
+        let mut unsupported_target = context.implementation_subject.clone();
+        unsupported_target.target.architecture = "aarch64".into();
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&unsupported_target),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut substituted_profile = context.implementation_subject.clone();
+        substituted_profile.target.launcher_class = "systemd_protected_launcher_v4".into();
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&substituted_profile),
+            Err(ProtocolError::InvalidRecord)
+        );
+        substituted_profile.launcher_profile_identity =
+            systemd_launcher_profile_identity(&systemd_launcher_profile_v4())
+                .expect("v4 launcher profile identity");
+        assert!(
+            protected_launcher_implementation_subject_v1_identity(&substituted_profile).is_ok()
+        );
+        let mut reverse_substitution = context.implementation_subject.clone();
+        reverse_substitution.launcher_profile_identity =
+            systemd_launcher_profile_identity(&systemd_launcher_profile_v4())
+                .expect("v4 launcher profile identity");
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&reverse_substitution),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut invalid_revision = context.implementation_subject.clone();
+        invalid_revision.protocol_source_revision = "0".repeat(40);
+        assert_eq!(
+            protected_launcher_implementation_subject_v1_identity(&invalid_revision),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn protected_launcher_dynamic_context_identities_are_exact() {
+        let nonce = [7_u8; 32];
+        assert_ne!(
+            protected_launcher_invocation_nonce_v1_identity(&nonce)
+                .expect("invocation nonce identity"),
+            protected_launcher_capability_observation_nonce_commitment_v1(&nonce)
+                .expect("public challenge nonce commitment")
+        );
+        assert_eq!(
+            protected_launcher_invocation_nonce_v1_identity(&nonce[..31]),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let boot_id = "123e4567-e89b-12d3-a456-426614174000";
+        assert!(protected_launcher_boot_v1_identity(boot_id).is_ok());
+        for malformed in [
+            "123E4567-e89b-12d3-a456-426614174000",
+            "123e4567e89b12d3a456426614174000",
+            "123e4567-e89b-12d3-a456-42661417400g",
+            " 123e4567-e89b-12d3-a456-426614174000",
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            assert_eq!(
+                protected_launcher_boot_v1_identity(malformed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+    }
+
+    #[test]
+    fn protected_capability_observation_records_are_closed_and_domain_separated() {
+        let challenge = capability_observation_challenge();
+        validate_protected_launcher_capability_observation_challenge_v1(
+            &challenge,
+            challenge.issued_at_unix_seconds,
+        )
+        .expect("fresh challenge");
+        let projection = capability_observation_projection();
+        validate_protected_launcher_capability_observation_projection_v1(&projection)
+            .expect("projection structure");
+        let verifier = capability_projection_verifier();
+        validate_protected_launcher_capability_projection_verifier_v1(&verifier)
+            .expect("verifier record");
+        let request = capability_observation_request();
+        assert_eq!(
+            protected_launcher_capability_observation_request_v1_identity(&request)
+                .expect("request identity"),
+            request.identity
+        );
+        let probe_request = capability_observation_probe_request();
+        assert_eq!(
+            protected_launcher_capability_observation_probe_request_v1_identity(&probe_request)
+                .expect("probe request identity"),
+            probe_request.identity
+        );
+        validate_protected_launcher_capability_observation_response_v1(
+            &ProtectedLauncherCapabilityObservationResponseV1 {
+                schema_version: 1,
+                message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_RESPONSE.into(),
+                request_identity: request.identity.clone(),
+                projection: projection.clone(),
+            },
+        )
+        .expect("response structure");
+        let signing_request = capability_observation_signing_request();
+        validate_protected_launcher_capability_observation_signing_request_v1(&signing_request)
+            .expect("signing request");
+        let signing_response = ProtectedLauncherCapabilityObservationSigningResponseV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE.into(),
+            request_identity: signing_request.identity.clone(),
+            projection: projection.clone(),
+        };
+        validate_protected_launcher_capability_observation_signing_response_v1(&signing_response)
+            .expect("signing response");
+        reconcile_protected_launcher_capability_observation_signing_response_v1(
+            &signing_request,
+            &signing_response,
+        )
+        .expect("signing response reconciliation");
+
+        assert_eq!(
+            challenge.identity,
+            "sha256:442b557b6066ad7a92e18065c5e743967ec75b76b3f341dcc29d573a65d2912c"
+        );
+        assert_eq!(
+            projection.projection_identity,
+            "sha256:df73f60bb069260f95e15ca057612e1909ea87afb0c8b9e24d315bd1a619594d"
+        );
+        assert_eq!(
+            verifier.key_identity,
+            "sha256:82036a64e616d869ded1381fbf244f8ee8f6f3353839da23abbe8bf2688c78fc"
+        );
+        assert_eq!(
+            verifier.identity,
+            "sha256:9383e8b65bc0ed6ab5fcba4f70280793d28c9771003a2829d05af2b516ac4d86"
+        );
+
+        assert_ne!(challenge.identity, projection.projection_identity);
+        assert_ne!(projection.projection_identity, verifier.identity);
+        assert_ne!(verifier.identity, verifier.key_identity);
+        let signature_message = protected_launcher_capability_observation_signature_message_v1(
+            &projection.projection_identity,
+        )
+        .expect("signature message");
+        assert!(
+            signature_message
+                .starts_with(PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1)
+        );
+        assert_eq!(
+            &signature_message
+                [PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNATURE_DOMAIN_V1.len()..],
+            projection.projection_identity.as_bytes()
+        );
+
+        let projection_json = serde_json::to_string(&projection).expect("projection JSON");
+        for prohibited in [
+            "protected_launcher_capability_identity",
+            "descriptor",
+            "cgroup",
+            "nonce_commitment",
+            "repository_path",
+            "provider",
+            "credential",
+        ] {
+            assert!(!projection_json.contains(prohibited));
+        }
+        let mut unknown = serde_json::to_value(&projection).expect("projection value");
+        unknown["capability_identity"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationProjectionV1>(unknown)
+                .is_err()
+        );
+        let mut unknown_payload = serde_json::to_value(&projection.payload).expect("payload value");
+        unknown_payload["provider"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationProjectionPayloadV1>(
+                unknown_payload,
+            )
+            .is_err()
+        );
+        let mut unknown_target =
+            serde_json::to_value(&projection.payload.target).expect("target value");
+        unknown_target["region"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationTargetV1>(
+                unknown_target
+            )
+            .is_err()
+        );
+        let mut unknown_challenge = serde_json::to_value(&challenge).expect("challenge value");
+        unknown_challenge["nonce"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationChallengeV1>(
+                unknown_challenge,
+            )
+            .is_err()
+        );
+        let mut unknown_request = serde_json::to_value(&request).expect("request value");
+        unknown_request["provider"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationRequestV1>(
+                unknown_request
+            )
+            .is_err()
+        );
+        let mut unknown_probe = serde_json::to_value(&probe_request).expect("probe value");
+        unknown_probe["provider"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationProbeRequestV1>(
+                unknown_probe
+            )
+            .is_err()
+        );
+        let mut unknown_verifier = serde_json::to_value(&verifier).expect("verifier value");
+        unknown_verifier["alternate_key"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityProjectionVerifierV1>(
+                unknown_verifier,
+            )
+            .is_err()
+        );
+        let mut unknown_signing_request =
+            serde_json::to_value(&signing_request).expect("signing request value");
+        unknown_signing_request["private_key"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationSigningRequestV1>(
+                unknown_signing_request,
+            )
+            .is_err()
+        );
+        let mut unknown_signing_response =
+            serde_json::to_value(&signing_response).expect("signing response value");
+        unknown_signing_response["protected_capability_identity"] =
+            serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityObservationSigningResponseV1>(
+                unknown_signing_response,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn protected_capability_observation_substitutions_refuse() {
+        let challenge = capability_observation_challenge();
+        let request = capability_observation_request();
+        let probe_request = capability_observation_probe_request();
+        let signing_request = capability_observation_signing_request();
+        for field in [
+            "producer_binding_identity",
+            "verifier_identity",
+            "protected_capability_identity",
+        ] {
+            let mut changed = signing_request.clone();
+            match field {
+                "producer_binding_identity" => {
+                    changed.producer_binding_identity = format!("sha256:{}", "a".repeat(64));
+                }
+                "verifier_identity" => {
+                    changed.verifier_identity = format!("sha256:{}", "b".repeat(64));
+                }
+                "protected_capability_identity" => {
+                    changed.protected_capability_identity = format!("sha256:{}", "c".repeat(64));
+                }
+                _ => unreachable!(),
+            }
+            assert_ne!(
+                protected_launcher_capability_observation_signing_request_v1_identity(&changed)
+                    .expect("changed signing identity"),
+                signing_request.identity
+            );
+            assert_eq!(
+                validate_protected_launcher_capability_observation_signing_request_v1(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let mut changed_payload = signing_request.clone();
+        changed_payload.payload.runner_version = "2.338.0".into();
+        changed_payload.projection_identity =
+            protected_launcher_capability_observation_projection_v1_identity(
+                &changed_payload.payload,
+            )
+            .expect("changed projection identity");
+        assert_ne!(
+            protected_launcher_capability_observation_signing_request_v1_identity(&changed_payload)
+                .expect("changed signing request identity"),
+            signing_request.identity
+        );
+        assert_eq!(
+            validate_protected_launcher_capability_observation_signing_request_v1(&changed_payload),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut historical_class = signing_request.clone();
+        historical_class.payload.capability_class = "systemd_protected_launcher_v3".into();
+        assert_eq!(
+            protected_launcher_capability_observation_projection_v1_identity(
+                &historical_class.payload,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let original_response = ProtectedLauncherCapabilityObservationSigningResponseV1 {
+            schema_version: 1,
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY_OBSERVATION_SIGNING_RESPONSE.into(),
+            request_identity: signing_request.identity.clone(),
+            projection: ProtectedLauncherCapabilityObservationProjectionV1 {
+                payload: signing_request.payload.clone(),
+                projection_identity: signing_request.projection_identity.clone(),
+                signature: "A".repeat(86),
+            },
+        };
+        let mut substituted_response = original_response.clone();
+        substituted_response.projection.payload.runner_version = "2.338.0".into();
+        substituted_response.projection.projection_identity =
+            protected_launcher_capability_observation_projection_v1_identity(
+                &substituted_response.projection.payload,
+            )
+            .expect("substituted projection identity");
+        validate_protected_launcher_capability_observation_signing_response_v1(
+            &substituted_response,
+        )
+        .expect("self-consistent substituted response");
+        assert_eq!(
+            reconcile_protected_launcher_capability_observation_signing_response_v1(
+                &signing_request,
+                &substituted_response,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut substituted_request_identity = original_response;
+        substituted_request_identity.request_identity = format!("sha256:{}", "d".repeat(64));
+        assert_eq!(
+            reconcile_protected_launcher_capability_observation_signing_response_v1(
+                &signing_request,
+                &substituted_request_identity,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        for nonce in [
+            "A".repeat(42),
+            format!("{}=", "A".repeat(42)),
+            "!".repeat(43),
+        ] {
+            let mut changed = request.clone();
+            changed.nonce = nonce;
+            assert_eq!(
+                protected_launcher_capability_observation_request_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let mut changed = request.clone();
+        changed.runner_version = "banana".into();
+        assert_eq!(
+            protected_launcher_capability_observation_request_v1_identity(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed = request.clone();
+        changed.expected_launcher_request_identity = format!("sha256:{}", "4".repeat(64));
+        let changed_identity =
+            protected_launcher_capability_observation_request_v1_identity(&changed)
+                .expect("changed request identity");
+        assert_ne!(changed_identity, request.identity);
+        changed.identity = changed_identity;
+        assert!(protected_launcher_capability_observation_request_v1_identity(&changed).is_ok());
+        let mut malformed = request.clone();
+        malformed.expected_launcher_request_identity = "not-an-identity".into();
+        assert_eq!(
+            protected_launcher_capability_observation_request_v1_identity(&malformed),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut substituted_probe = probe_request.clone();
+        substituted_probe
+            .observation
+            .expected_launcher_request_identity = format!("sha256:{}", "f".repeat(64));
+        substituted_probe.observation.identity =
+            protected_launcher_capability_observation_request_v1_identity(
+                &substituted_probe.observation,
+            )
+            .expect("substituted observation identity");
+        assert_eq!(
+            protected_launcher_capability_observation_probe_request_v1_identity(&substituted_probe),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            validate_protected_launcher_capability_observation_challenge_v1(
+                &challenge,
+                challenge.expires_at_unix_seconds + 1,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            validate_protected_launcher_capability_observation_challenge_v1(
+                &challenge,
+                challenge.issued_at_unix_seconds - 1,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        for (issued_at_unix_seconds, expires_at_unix_seconds) in [
+            (0, 1),
+            (
+                challenge.issued_at_unix_seconds,
+                challenge.issued_at_unix_seconds,
+            ),
+            (
+                challenge.expires_at_unix_seconds,
+                challenge.issued_at_unix_seconds,
+            ),
+            (
+                challenge.issued_at_unix_seconds,
+                challenge.issued_at_unix_seconds + 301,
+            ),
+        ] {
+            let mut changed = challenge.clone();
+            changed.issued_at_unix_seconds = issued_at_unix_seconds;
+            changed.expires_at_unix_seconds = expires_at_unix_seconds;
+            assert_eq!(
+                protected_launcher_capability_observation_challenge_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        for (run_id, attempt) in [("0", "1"), ("01", "1"), ("1", "0"), ("1", "01")] {
+            let mut changed = challenge.clone();
+            changed.workflow_run_id = run_id.into();
+            changed.workflow_run_attempt = attempt.into();
+            assert_eq!(
+                protected_launcher_capability_observation_challenge_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        for workflow_reference in [
+            "ota-run/ota/.github/workflows/.hidden.yml@refs/heads/main",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/feature//test",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/feature/../main",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/feature/.hidden",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/main^",
+            "ota-run/ota/.github/workflows/check.yml@refs/heads/main.lock",
+            "ota-run/ota/.github/workflows/nested/check.yml@refs/heads/main",
+            "-ota/ota/.github/workflows/check.yml@refs/heads/main",
+            "ota-/ota/.github/workflows/check.yml@refs/heads/main",
+            "ota-run/.ota/.github/workflows/check.yml@refs/heads/main",
+            "ota-run/ota/.github/workflows/check.yml@main",
+        ] {
+            let mut changed = challenge.clone();
+            changed.workflow_reference = workflow_reference.into();
+            assert_eq!(
+                protected_launcher_capability_observation_challenge_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        let projection = capability_observation_projection();
+        let mut changed = projection.clone();
+        changed.payload.challenge_identity = format!("sha256:{}", "b".repeat(64));
+        assert_eq!(
+            validate_protected_launcher_capability_observation_projection_v1(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed = projection.clone();
+        changed.payload.target.architecture = "arm64".into();
+        assert_eq!(
+            protected_launcher_capability_observation_projection_v1_identity(&changed.payload),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            validate_protected_launcher_capability_observation_projection_v1(&changed),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        for runner_version in ["2.337.0", "2.337.0-rc.1", "2.337.0+build.7"] {
+            let mut changed = projection.clone();
+            changed.payload.runner_version = runner_version.into();
+            changed.projection_identity =
+                protected_launcher_capability_observation_projection_v1_identity(&changed.payload)
+                    .expect("canonical runner version");
+            validate_protected_launcher_capability_observation_projection_v1(&changed)
+                .expect("canonical projection");
+        }
+        for runner_version in ["banana", "01.2", "2.337", "v2.337.0", "2.337.0-01"] {
+            let mut changed = projection.clone();
+            changed.payload.runner_version = runner_version.into();
+            assert_eq!(
+                protected_launcher_capability_observation_projection_v1_identity(&changed.payload),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        for (field, value) in [
+            ("challenge_identity", format!("sha256:{}", "b".repeat(64))),
+            ("runner_version", "2.338.0".into()),
+            ("signing_key_identity", format!("sha256:{}", "c".repeat(64))),
+        ] {
+            let mut changed = projection.clone();
+            match field {
+                "challenge_identity" => changed.payload.challenge_identity = value,
+                "runner_version" => changed.payload.runner_version = value,
+                "signing_key_identity" => changed.payload.signing_key_identity = value,
+                _ => unreachable!(),
+            }
+            let changed_identity =
+                protected_launcher_capability_observation_projection_v1_identity(&changed.payload)
+                    .expect("structurally valid substitution");
+            assert_ne!(
+                changed_identity, projection.projection_identity,
+                "{field} is bound"
+            );
+        }
+
+        let verifier = capability_projection_verifier();
+        let mut noncanonical_key = verifier.clone();
+        noncanonical_key.public_key = format!("{}B", "A".repeat(42));
+        assert_eq!(
+            protected_launcher_capability_projection_verifier_v1_identity(&noncanonical_key),
+            Err(ProtocolError::InvalidRecord)
+        );
+        for final_character in [
+            b'A', b'E', b'I', b'M', b'Q', b'U', b'Y', b'c', b'g', b'k', b'o', b's', b'w', b'0',
+            b'4', b'8',
+        ] {
+            let mut accepted = verifier.clone();
+            accepted.public_key = format!("{}{}", "A".repeat(42), char::from(final_character));
+            accepted.key_identity =
+                protected_launcher_capability_projection_key_identity_v1(&accepted.public_key)
+                    .expect("canonical public-key tail");
+            accepted.identity =
+                protected_launcher_capability_projection_verifier_v1_identity(&accepted)
+                    .expect("canonical verifier tail");
+            validate_protected_launcher_capability_projection_verifier_v1(&accepted)
+                .expect("canonical verifier");
+        }
+        for public_key in [
+            format!("{}=", "A".repeat(42)),
+            "A".repeat(42),
+            format!("{}!", "A".repeat(42)),
+        ] {
+            assert_eq!(
+                protected_launcher_capability_projection_key_identity_v1(&public_key),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+        let mut noncanonical_signature = projection;
+        noncanonical_signature.signature = format!("{}B", "A".repeat(85));
+        assert_eq!(
+            validate_protected_launcher_capability_observation_projection_v1(
+                &noncanonical_signature,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        for final_character in [b'A', b'Q', b'g', b'w'] {
+            let mut accepted = capability_observation_projection();
+            accepted.signature = format!("{}{}", "A".repeat(85), char::from(final_character));
+            validate_protected_launcher_capability_observation_projection_v1(&accepted)
+                .expect("canonical signature tail");
+        }
+        for field in [
+            "schema_version",
+            "record_kind",
+            "key_usage",
+            "signature_domain",
+        ] {
+            let mut value = serde_json::to_value(&verifier).expect("verifier value");
+            value[field] = match field {
+                "schema_version" => serde_json::json!(2),
+                _ => serde_json::json!("substituted"),
+            };
+            let changed: ProtectedLauncherCapabilityProjectionVerifierV1 =
+                serde_json::from_value(value).expect("changed verifier");
+            assert_eq!(
+                protected_launcher_capability_projection_verifier_v1_identity(&changed),
+                Err(ProtocolError::InvalidRecord),
+                "{field} substitution must refuse"
+            );
+        }
+    }
+
+    #[test]
+    fn secret_delivery_transaction_binding_is_closed_and_same_session_bound() {
+        let continuation = secret_delivery_startup_continuation();
+        let request = secret_delivery_transaction_binding_request();
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let response = secret_delivery_transaction_binding_response(&request, &evidence);
+        validate_protected_launcher_secret_delivery_transaction_binding_request_v1(&request)
+            .expect("request validates");
+        reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+            &request,
+            &continuation,
+        )
+        .expect("request reconciles before protected work");
+        validate_protected_launcher_secret_delivery_transaction_binding_v1(&response.binding)
+            .expect("binding validates");
+        reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
+            &request,
+            &response,
+            &continuation,
+            &evidence.verifier,
+            &evidence.installation_evidence_identity,
+        )
+        .expect("Core-visible response reconciles");
+        reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+            &request,
+            &response,
+            &continuation,
+            &evidence,
+        )
+        .expect("same-session response reconciles");
+
+        let derived_session = protected_launcher_secret_delivery_transaction_session_v1_identity(
+            request.startup_continuation_identity.as_str(),
+        )
+        .expect("session identity");
+        assert_eq!(derived_session, request.session_identity);
+        assert_eq!(
+            derived_session,
+            protected_launcher_secret_delivery_transaction_session_v1_identity(
+                request.startup_continuation_identity.as_str(),
+            )
+            .expect("deterministic session identity")
+        );
+        assert_ne!(
+            derived_session,
+            protected_launcher_secret_delivery_transaction_session_v1_identity(
+                format!("sha256:{}", "6".repeat(64)).as_str(),
+            )
+            .expect("distinct startup identity")
+        );
+        assert_eq!(
+            protected_launcher_secret_delivery_transaction_session_v1_identity("not-an-identity"),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut substituted_continuation = continuation.clone();
+        substituted_continuation.launcher_request_identity = format!("sha256:{}", "7".repeat(64));
+        substituted_continuation.identity =
+            launcher_startup_continuation_identity(&substituted_continuation)
+                .expect("substituted continuation identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_request_v1(
+                &request,
+                &substituted_continuation,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut substituted_launcher_request = request.clone();
+        substituted_launcher_request.launcher_request_identity =
+            format!("sha256:{}", "7".repeat(64));
+        substituted_launcher_request
+            .observation
+            .expected_launcher_request_identity = substituted_launcher_request
+            .launcher_request_identity
+            .clone();
+        substituted_launcher_request.observation.identity =
+            protected_launcher_capability_observation_request_v1_identity(
+                &substituted_launcher_request.observation,
+            )
+            .expect("substituted observation identity");
+        substituted_launcher_request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v1_identity(
+                &substituted_launcher_request,
+            )
+            .expect("substituted binding request identity");
+        let mut substituted_launcher_response = response.clone();
+        substituted_launcher_response.request_identity =
+            substituted_launcher_request.identity.clone();
+        substituted_launcher_response.binding.request_identity =
+            substituted_launcher_request.identity.clone();
+        substituted_launcher_response
+            .binding
+            .launcher_request_identity = substituted_launcher_request
+            .launcher_request_identity
+            .clone();
+        substituted_launcher_response
+            .binding
+            .observation_request_identity =
+            substituted_launcher_request.observation.identity.clone();
+        substituted_launcher_response.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v1_identity(
+                &substituted_launcher_response.binding,
+            )
+            .expect("substituted launcher response identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
+                &substituted_launcher_request,
+                &substituted_launcher_response,
+                &continuation,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent launcher-request substitution must not inherit the response"
+        );
+
+        let mut substituted_continuation = continuation.clone();
+        substituted_continuation.process_posture_identity = format!("sha256:{}", "6".repeat(64));
+        substituted_continuation.identity =
+            launcher_startup_continuation_identity(&substituted_continuation)
+                .expect("substituted continuation identity");
+        let mut substituted_continuation_request = request.clone();
+        substituted_continuation_request.startup_continuation_identity =
+            substituted_continuation.identity.clone();
+        substituted_continuation_request.session_identity =
+            protected_launcher_secret_delivery_transaction_session_v1_identity(
+                &substituted_continuation.identity,
+            )
+            .expect("substituted session identity");
+        substituted_continuation_request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v1_identity(
+                &substituted_continuation_request,
+            )
+            .expect("substituted continuation request identity");
+        let mut substituted_continuation_response = response.clone();
+        substituted_continuation_response.request_identity =
+            substituted_continuation_request.identity.clone();
+        substituted_continuation_response.binding.request_identity =
+            substituted_continuation_request.identity.clone();
+        substituted_continuation_response
+            .binding
+            .startup_continuation_identity = substituted_continuation.identity;
+        substituted_continuation_response.binding.session_identity =
+            substituted_continuation_request.session_identity.clone();
+        substituted_continuation_response.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v1_identity(
+                &substituted_continuation_response.binding,
+            )
+            .expect("substituted continuation response identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
+                &substituted_continuation_request,
+                &substituted_continuation_response,
+                &continuation,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent continuation substitution must not replace retained truth"
+        );
+
+        for mut forged in [
+            {
+                let mut request = request.clone();
+                request.session_identity = format!("sha256:{}", "9".repeat(64));
+                request
+            },
+            {
+                let mut request = request.clone();
+                request.startup_continuation_identity = format!("sha256:{}", "8".repeat(64));
+                request
+            },
+        ] {
+            // Recompute the outer request hash exactly as an untrusted caller could. Validation
+            // must still reject the session/startup relationship before Launcher derivation.
+            forged.identity.clear();
+            forged.identity = message_identity(
+                PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V1,
+                &forged,
+            )
+            .expect("forged outer request identity");
+            assert_eq!(
+                protected_launcher_secret_delivery_transaction_binding_request_v1_identity(&forged,),
+                Err(ProtocolError::InvalidRecord)
+            );
+            assert_eq!(
+                validate_protected_launcher_secret_delivery_transaction_binding_request_v1(&forged),
+                Err(ProtocolError::InvalidRecord)
+            );
+            assert_eq!(
+                reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+                    &forged,
+                    &response,
+                    &continuation,
+                    &evidence,
+                ),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
+
+        let mut unknown = serde_json::to_value(&response.binding).expect("binding JSON");
+        unknown
+            .as_object_mut()
+            .expect("binding object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingV1>(unknown)
+                .is_err()
+        );
+        let mut unknown_request = serde_json::to_value(&request).expect("request JSON");
+        unknown_request
+            .as_object_mut()
+            .expect("request object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingRequestV1>(
+                unknown_request
+            )
+            .is_err()
+        );
+        let mut unknown_response = serde_json::to_value(&response).expect("response JSON");
+        unknown_response
+            .as_object_mut()
+            .expect("response object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingResponseV1>(
+                unknown_response
+            )
+            .is_err()
+        );
+        let mut wrong_version = request.clone();
+        wrong_version.schema_version = 2;
+        assert_eq!(
+            validate_protected_launcher_secret_delivery_transaction_binding_request_v1(
+                &wrong_version
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut wrong_kind = response.clone();
+        wrong_kind.message_kind = "other".into();
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+                &request,
+                &wrong_kind,
+                &continuation,
+                &evidence,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
+                &request,
+                &response,
+                &continuation,
+                &evidence.verifier,
+                format!("sha256:{}", "8".repeat(64)).as_str(),
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "independently retained installation evidence must match"
+        );
+        let mut foreign_verifier = evidence.verifier.clone();
+        foreign_verifier.public_key = format!("{}Q", "A".repeat(42));
+        foreign_verifier.key_identity =
+            protected_launcher_capability_projection_key_identity_v1(&foreign_verifier.public_key)
+                .expect("foreign key identity");
+        foreign_verifier.identity =
+            protected_launcher_capability_projection_verifier_v1_identity(&foreign_verifier)
+                .expect("foreign verifier identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v1(
+                &request,
+                &response,
+                &continuation,
+                &foreign_verifier,
+                &evidence.installation_evidence_identity,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a caller-selected verifier must not authorize the response"
+        );
+
+        for field in [
+            "startup_continuation_identity",
+            "session_identity",
+            "secret_transaction_candidate_identity",
+        ] {
+            let mut substituted = response.clone();
+            let replacement = format!("sha256:{}", "a".repeat(64));
+            match field {
+                "startup_continuation_identity" => {
+                    substituted.binding.startup_continuation_identity = replacement
+                }
+                "session_identity" => substituted.binding.session_identity = replacement,
+                _ => substituted.binding.secret_transaction_candidate_identity = replacement,
+            }
+            substituted.binding.identity =
+                protected_launcher_secret_delivery_transaction_binding_v1_identity(
+                    &substituted.binding,
+                )
+                .expect("self-consistent substituted binding");
+            assert_eq!(
+                reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+                    &request,
+                    &substituted,
+                    &continuation,
+                    &evidence,
+                ),
+                Err(ProtocolError::InvalidRecord),
+                "{field} substitution must refuse"
+            );
+        }
+
+        for field in [
+            "protected_capability_identity",
+            "projection_identity",
+            "verifier_identity",
+            "installation_evidence_identity",
+        ] {
+            let mut substituted = response.clone();
+            let replacement = format!("sha256:{}", "a".repeat(64));
+            match field {
+                "startup_continuation_identity" => {
+                    substituted.binding.startup_continuation_identity = replacement
+                }
+                "session_identity" => substituted.binding.session_identity = replacement,
+                "secret_transaction_candidate_identity" => {
+                    substituted.binding.secret_transaction_candidate_identity = replacement
+                }
+                "protected_capability_identity" => {
+                    substituted.binding.protected_capability_identity = replacement
+                }
+                "projection_identity" => substituted.binding.projection_identity = replacement,
+                "verifier_identity" => substituted.binding.verifier_identity = replacement,
+                _ => substituted.binding.installation_evidence_identity = replacement,
+            }
+            substituted.binding.identity =
+                protected_launcher_secret_delivery_transaction_binding_v1_identity(
+                    &substituted.binding,
+                )
+                .expect("self-consistent substituted binding");
+            assert_eq!(
+                reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+                    &request,
+                    &substituted,
+                    &continuation,
+                    &evidence,
+                ),
+                Err(ProtocolError::InvalidRecord),
+                "{field} substitution must refuse against retained evidence"
+            );
+        }
+
+        for field in [
+            "projection_challenge_identity",
+            "projection_runner_version",
+            "projection_signing_key_identity",
+            "capability_launcher_request_identity",
+        ] {
+            let mut substituted_evidence = evidence.clone();
+            match field {
+                "projection_challenge_identity" => {
+                    substituted_evidence.projection.payload.challenge_identity =
+                        format!("sha256:{}", "b".repeat(64));
+                    substituted_evidence.projection.projection_identity =
+                        protected_launcher_capability_observation_projection_v1_identity(
+                            &substituted_evidence.projection.payload,
+                        )
+                        .expect("self-consistent projection identity");
+                }
+                "projection_runner_version" => {
+                    substituted_evidence.projection.payload.runner_version = "2.338.0".into();
+                    substituted_evidence.projection.projection_identity =
+                        protected_launcher_capability_observation_projection_v1_identity(
+                            &substituted_evidence.projection.payload,
+                        )
+                        .expect("self-consistent projection identity");
+                }
+                "projection_signing_key_identity" => {
+                    substituted_evidence.projection.payload.signing_key_identity =
+                        format!("sha256:{}", "c".repeat(64));
+                    substituted_evidence.projection.projection_identity =
+                        protected_launcher_capability_observation_projection_v1_identity(
+                            &substituted_evidence.projection.payload,
+                        )
+                        .expect("self-consistent projection identity");
+                }
+                _ => {
+                    substituted_evidence
+                        .protected_capability
+                        .launcher_request_identity = format!("sha256:{}", "d".repeat(64));
+                    substituted_evidence.protected_capability.identity =
+                        protected_launcher_capability_v1_identity(
+                            &substituted_evidence.protected_capability,
+                        )
+                        .expect("self-consistent capability identity");
+                }
+            }
+            let mut substituted = response.clone();
+            substituted.projection = substituted_evidence.projection.clone();
+            substituted.binding.projection_identity =
+                substituted_evidence.projection.projection_identity.clone();
+            substituted.binding.protected_capability_identity =
+                substituted_evidence.protected_capability.identity.clone();
+            substituted.binding.identity =
+                protected_launcher_secret_delivery_transaction_binding_v1_identity(
+                    &substituted.binding,
+                )
+                .expect("self-consistent binding identity");
+            assert_eq!(
+                reconcile_protected_launcher_secret_delivery_transaction_binding_v1(
+                    &request,
+                    &substituted,
+                    &continuation,
+                    &substituted_evidence,
+                ),
+                Err(ProtocolError::InvalidRecord),
+                "{field} substitution must refuse"
+            );
+        }
+    }
+
+    fn protected_capability() -> ProtectedLauncherCapabilityV1 {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let descriptors = vec![
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket, 1),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::VerifierStore, 2),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::BindingStore, 3),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::InvocationCgroup, 4),
+        ];
+        let mut capability = ProtectedLauncherCapabilityV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            launcher_request_identity: identity('1'),
+            launcher_executable_identity: identity('2'),
+            launcher_configuration_identity: identity('3'),
+            launcher_service_binding_identity: identity('4'),
+            launcher_profile_identity: identity('5'),
+            runner_administrator_identity: identity('6'),
+            service_uid: 0,
+            service_gid: 0,
+            invocation_nonce_identity: identity('7'),
+            boot_identity: identity('8'),
+            protected_launcher_instance_identity: identity('9'),
+            systemd_invocation_identity: identity('a'),
+            systemd_scope_identity: identity('b'),
+            cgroup_identity: identity('0'),
+            child_process_identity: identity('c'),
+            principal_mapping_identity: identity('d'),
+            process_posture_identity: identity('e'),
+            implementation_subject_identity: identity('f'),
+            descriptors,
+        };
+        capability.identity = protected_launcher_capability_v1_identity(&capability)
+            .expect("protected launcher capability identity");
+        capability
+    }
+
     #[test]
     fn framing_is_bounded_and_exact() {
         let payload = br#"{"message_kind":"challenge_request"}"#;
@@ -3543,6 +9066,690 @@ mod tests {
         assert_eq!(
             decode_frame(&[0, 0, 0, 2, b'{']),
             Err(ProtocolError::IncompleteFrame)
+        );
+    }
+
+    #[test]
+    fn protected_launcher_capability_is_closed_canonical_and_content_addressed() {
+        let capability = protected_capability();
+        assert_eq!(
+            sha256_identity(
+                &serde_jcs::to_vec(&capability.descriptors[0]).expect("descriptor JCS")
+            ),
+            "sha256:a2a4518f22a1ce63ea8c9520b963fa9d54a6f92bab458d27d8a40cb7ef776a1e"
+        );
+        assert_eq!(
+            sha256_identity(&serde_jcs::to_vec(&capability).expect("capability JCS")),
+            "sha256:d4489737bb58897aad5c42525cb3f7a3dc7e68caae6622860d27b3dfb8c0705c"
+        );
+        assert_eq!(
+            capability.descriptors[0].identity,
+            "sha256:7a9488e0effeb2b791c2ad184d8f94e4b6644f6fb3fee648dcd9423a701ff3a7"
+        );
+        assert_eq!(
+            capability.identity,
+            "sha256:a261408212f7f0da88b1ae529c7b16f55c2dd8cf9baf71480d85e516c60fdad0"
+        );
+        let descriptor_json =
+            serde_json::to_value(&capability.descriptors[0]).expect("descriptor JSON");
+        assert_eq!(descriptor_json["role"], "launcher_session_socket");
+        assert_eq!(descriptor_json["kind"], "unix_stream_socket");
+        assert_eq!(descriptor_json["access"], "read_write");
+        assert!(descriptor_json.get("content_identity").is_none());
+        assert_eq!(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::VerifierStore,
+                VERIFIER_STORE_BYTES,
+            )
+            .expect("verifier store identity"),
+            "sha256:e56e26fb0be37f27cdc15d0fc10a682a3a7492cf4e1c8bb04481bcb8b9db9b85"
+        );
+        assert_eq!(
+            protected_launcher_store_content_identity_v1(
+                ProtectedLauncherDescriptorRoleV1::BindingStore,
+                BINDING_STORE_BYTES,
+            )
+            .expect("binding store identity"),
+            "sha256:c89a3a030fa0549e6df7ba28e7a475efdbd155fcc601ea6357dae83a2d8613c8"
+        );
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&capability)
+                .expect("stable capability identity"),
+            capability.identity
+        );
+
+        let mut reordered = capability.clone();
+        reordered.descriptors.reverse();
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&reordered)
+                .expect("descriptor order is not semantic"),
+            capability.identity
+        );
+
+        let mut changed_store = capability.clone();
+        let verifier = changed_store
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore)
+            .expect("verifier descriptor");
+        verifier.size += 1;
+        verifier.identity = protected_launcher_descriptor_v1_identity(verifier)
+            .expect("changed verifier descriptor identity");
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_store)
+                .expect("changed store capability identity"),
+            capability.identity
+        );
+
+        let mut changed_request = capability.clone();
+        changed_request.launcher_request_identity = format!("sha256:{}", "0".repeat(64));
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_request)
+                .expect("changed request capability identity"),
+            capability.identity
+        );
+
+        let mut changed_subject = capability.clone();
+        changed_subject.implementation_subject_identity = format!("sha256:{}", "0".repeat(64));
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_subject)
+                .expect("changed subject capability identity"),
+            capability.identity
+        );
+
+        let mut duplicate = capability.clone();
+        duplicate.descriptors[2] = duplicate.descriptors[1].clone();
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&duplicate),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut missing = capability.clone();
+        missing.descriptors.pop();
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&missing),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut unknown_capability_field =
+            serde_json::to_value(&capability).expect("capability JSON");
+        unknown_capability_field["provider_token"] = serde_json::Value::String("forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherCapabilityV1>(unknown_capability_field)
+                .is_err()
+        );
+        let mut unknown_descriptor_field =
+            serde_json::to_value(&capability.descriptors[0]).expect("descriptor JSON");
+        unknown_descriptor_field["path"] = serde_json::Value::String("/forbidden".into());
+        assert!(
+            serde_json::from_value::<ProtectedLauncherDescriptorV1>(unknown_descriptor_field)
+                .is_err()
+        );
+
+        let mut wrong_cgroup = capability.clone();
+        wrong_cgroup.cgroup_identity = format!("sha256:{}", "1".repeat(64));
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&wrong_cgroup)
+                .expect("changed cgroup identity remains structurally valid"),
+            capability.identity
+        );
+
+        let mut non_root_service = capability.clone();
+        non_root_service.service_uid = 1000;
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&non_root_service),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut writable_store = capability;
+        let binding = writable_store
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore)
+            .expect("binding descriptor");
+        binding.access = ProtectedLauncherDescriptorAccessV1::ReadWrite;
+        assert_eq!(
+            protected_launcher_descriptor_v1_identity(binding),
+            Err(ProtocolError::InvalidRecord)
+        );
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&writable_store),
+            Err(ProtocolError::InvalidRecord)
+        );
+    }
+
+    #[test]
+    fn protected_launcher_capability_binds_every_private_identity_without_secret_material() {
+        let capability = protected_capability();
+        let original_identity = capability.identity.clone();
+        let substituted_identity = format!("sha256:{}", "0".repeat(64));
+        for field in [
+            "launcher_request_identity",
+            "launcher_executable_identity",
+            "launcher_configuration_identity",
+            "launcher_service_binding_identity",
+            "launcher_profile_identity",
+            "runner_administrator_identity",
+            "invocation_nonce_identity",
+            "boot_identity",
+            "protected_launcher_instance_identity",
+            "systemd_invocation_identity",
+            "systemd_scope_identity",
+            "child_process_identity",
+            "principal_mapping_identity",
+            "process_posture_identity",
+            "implementation_subject_identity",
+        ] {
+            let mut value = serde_json::to_value(&capability).expect("capability JSON");
+            value[field] = serde_json::Value::String(substituted_identity.clone());
+            let changed: ProtectedLauncherCapabilityV1 =
+                serde_json::from_value(value).expect("changed capability");
+            assert_ne!(
+                protected_launcher_capability_v1_identity(&changed)
+                    .expect("changed capability identity"),
+                original_identity,
+                "{field} must participate in capability identity"
+            );
+        }
+
+        let mut changed_cgroup = capability.clone();
+        let cgroup = changed_cgroup
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+            })
+            .expect("cgroup descriptor");
+        cgroup.inode += 1;
+        cgroup.identity = protected_launcher_descriptor_v1_identity(cgroup)
+            .expect("changed cgroup descriptor identity");
+        changed_cgroup.cgroup_identity = substituted_identity;
+        assert_ne!(
+            protected_launcher_capability_v1_identity(&changed_cgroup)
+                .expect("changed cgroup capability identity"),
+            original_identity
+        );
+
+        let value = serde_json::to_value(&capability).expect("capability JSON");
+        let keys = value
+            .as_object()
+            .expect("capability object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from([
+                "boot_identity",
+                "cgroup_identity",
+                "child_process_identity",
+                "descriptors",
+                "identity",
+                "implementation_subject_identity",
+                "invocation_nonce_identity",
+                "launcher_configuration_identity",
+                "launcher_executable_identity",
+                "launcher_profile_identity",
+                "launcher_request_identity",
+                "launcher_service_binding_identity",
+                "message_kind",
+                "principal_mapping_identity",
+                "process_posture_identity",
+                "protected_launcher_instance_identity",
+                "protocol_version",
+                "runner_administrator_identity",
+                "schema_version",
+                "service_gid",
+                "service_uid",
+                "systemd_invocation_identity",
+                "systemd_scope_identity",
+            ])
+        );
+        let descriptor_keys = value["descriptors"]
+            .as_array()
+            .expect("descriptor array")
+            .iter()
+            .flat_map(|descriptor| {
+                descriptor
+                    .as_object()
+                    .expect("descriptor object")
+                    .keys()
+                    .map(String::as_str)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            descriptor_keys,
+            std::collections::BTreeSet::from([
+                "access",
+                "content_identity",
+                "device",
+                "identity",
+                "inode",
+                "kind",
+                "mode",
+                "owner_gid",
+                "owner_uid",
+                "role",
+                "schema_version",
+                "size",
+            ])
+        );
+        let encoded = serde_json::to_vec(&value).expect("capability bytes");
+        encode_frame(&encoded).expect("bounded capability frame");
+        let encoded = String::from_utf8(encoded).expect("capability JSON is UTF-8");
+        for prohibited in [
+            "token",
+            "provider",
+            "secret",
+            "path",
+            "credential",
+            "handle",
+            "verifiers",
+            "bindings",
+        ] {
+            assert!(
+                !encoded.contains(prohibited),
+                "capability must not carry {prohibited} material"
+            );
+        }
+    }
+
+    #[test]
+    fn protected_launcher_capability_reconciles_canonical_launcher_evidence() {
+        let identity = |value: char| format!("sha256:{}", value.to_string().repeat(64));
+        let principal = |uid: u32, gid: u32| UnixPrincipalIdentity {
+            real_uid: uid,
+            effective_uid: uid,
+            saved_uid: uid,
+            filesystem_uid: uid,
+            real_gid: gid,
+            effective_gid: gid,
+            saved_gid: gid,
+            filesystem_gid: gid,
+        };
+        let request = LauncherInvocationRequestV1 {
+            message_kind: LAUNCHER_INVOCATION_REQUEST.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            authority_id: "secret-delivery".into(),
+            ota_arguments: vec!["run".into(), "publish".into()],
+            repository_path: "/srv/ota/repository".into(),
+        };
+        let request_identity =
+            launcher_invocation_request_identity(&request).expect("launcher request identity");
+        let launcher_configuration_identity = identity('3');
+        let job_profile = systemd_job_principal_profile_v2();
+        let job_profile_identity =
+            systemd_job_principal_profile_identity(&job_profile).expect("job profile identity");
+        let mut principal_mapping = LauncherPrincipalMappingV1 {
+            schema_version: 1,
+            identity: String::new(),
+            job_peer: principal(1001, 1001),
+            execution: principal(1002, 1002),
+            job_principal_profile_identity: job_profile_identity.clone(),
+            launcher_session_binding_identity: launcher_configuration_identity.clone(),
+        };
+        principal_mapping.identity = launcher_principal_mapping_identity(&principal_mapping)
+            .expect("principal mapping identity");
+        let mut working_directory = LauncherWorkingDirectoryV1 {
+            schema_version: 1,
+            identity: String::new(),
+            logical_path: request.repository_path.clone(),
+            device: 31,
+            inode: 3100,
+        };
+        working_directory.identity = launcher_working_directory_identity(&working_directory)
+            .expect("working-directory identity");
+        let mut child = LauncherChildProcessV1 {
+            schema_version: 1,
+            identity: String::new(),
+            invocation_id: "secret-delivery-1".into(),
+            request_identity: request_identity.clone(),
+            pid: 4242,
+            process_start_time_identity: identity('7'),
+            ota_binary_identity: identity('2'),
+            principal_mapping_identity: principal_mapping.identity.clone(),
+            working_directory_identity: working_directory.identity,
+        };
+        child.identity = launcher_child_process_identity(&child).expect("child identity");
+        let mut scope = LauncherSystemdScopeV1 {
+            schema_version: 1,
+            identity: String::new(),
+            invocation_id: child.invocation_id.clone(),
+            request_identity: request_identity.clone(),
+            child_identity: child.identity.clone(),
+            child_pid: child.pid,
+            unit_name: "ota-authority-invocation-0123456789abcdef.scope".into(),
+            unit_object_path:
+                "/org/freedesktop/systemd1/unit/ota_2dauthority_2dinvocation_2d0123456789abcdef_2escope"
+                    .into(),
+            slice: "ota-authority-invocations.slice".into(),
+            control_group: "/ota-authority-invocations.slice/ota-authority-invocation-0123456789abcdef.scope"
+                .into(),
+            delegate: false,
+            kill_mode: "control-group".into(),
+            collect_mode: "inactive-or-failed".into(),
+        };
+        scope.identity = launcher_systemd_scope_identity(&scope).expect("scope identity");
+        let mut process_posture = OtaProcessPostureV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: OTA_PROCESS_POSTURE.into(),
+            pid: child.pid,
+            process_start_time_identity: child.process_start_time_identity.clone(),
+            ota_binary_identity: child.ota_binary_identity.clone(),
+            no_new_privs: true,
+            dumpable: 0,
+            ptracer_clear_applied: true,
+            principal_mapping_identity: principal_mapping.identity.clone(),
+        };
+        process_posture.identity =
+            ota_process_posture_identity(&process_posture).expect("process posture identity");
+        let launcher_profile = systemd_launcher_profile_v3();
+        let launcher_profile_identity = systemd_launcher_profile_identity(&launcher_profile)
+            .expect("launcher profile identity");
+        let mut foundation = SystemdProtectedLauncherInstanceEvidenceV1 {
+            schema_version: 1,
+            identity: String::new(),
+            adapter: SYSTEMD_PROTECTED_LAUNCHER_ADAPTER_V1.into(),
+            principal_mapping: principal_mapping.clone(),
+            process_posture: process_posture.clone(),
+            systemd_launcher_profile_identity: launcher_profile_identity.clone(),
+            systemd_job_principal_profile_identity: job_profile_identity,
+            launcher_session_binding_identity: launcher_configuration_identity.clone(),
+            systemd_invocation_identity: scope.identity.clone(),
+            working_directory_identity: child.working_directory_identity.clone(),
+            child_process_identity: child.identity.clone(),
+        };
+        foundation.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(&foundation)
+                .expect("launcher foundation identity");
+        let mut launcher_instance = SystemdProtectedLauncherInstanceEvidenceV2 {
+            schema_version: 3,
+            identity: String::new(),
+            instance_v1: foundation,
+            launcher_observations: launcher_profile
+                .evidence_sources
+                .into_iter()
+                .map(|source| SystemdLauncherObservation {
+                    source,
+                    state: RuntimeBoundaryObservationState::Verified,
+                    reason_code: "verified_by_systemd_protected_launcher".into(),
+                    evidence_identity: Some(identity('8')),
+                })
+                .collect(),
+            job_principal_observations: job_profile
+                .requirements
+                .into_iter()
+                .map(|required| SystemdJobPrincipalObservation {
+                    requirement: required.requirement,
+                    evidence_methods: required.evidence_methods,
+                    state: RuntimeBoundaryObservationState::Verified,
+                    reason_code: "verified_by_systemd_protected_launcher".into(),
+                    evidence_identity: Some(identity('9')),
+                })
+                .collect(),
+        };
+        launcher_instance.identity =
+            systemd_protected_launcher_instance_v2_identity(&launcher_instance)
+                .expect("complete launcher instance identity");
+
+        let descriptors = vec![
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::LauncherSessionSocket, 1),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::VerifierStore, 2),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::BindingStore, 3),
+            protected_descriptor(ProtectedLauncherDescriptorRoleV1::InvocationCgroup, 4),
+        ];
+        let cgroup_descriptor = &descriptors[3];
+        let cgroup_identity = protected_launcher_cgroup_v1_identity(&scope, cgroup_descriptor)
+            .expect("cgroup identity");
+        assert_eq!(
+            cgroup_identity,
+            "sha256:6a970aa7da9df5e80123b75ff98418340b0ab3d21983a8068f22502c0ed99a89"
+        );
+        let runner_administrator_identity = identity('6');
+        let invocation_nonce_identity = identity('a');
+        let boot_identity = identity('b');
+        let implementation_subject_identity = identity('c');
+        let launcher_service_binding_identity = identity('4');
+        let mut capability = ProtectedLauncherCapabilityV1 {
+            schema_version: 1,
+            identity: String::new(),
+            message_kind: PROTECTED_LAUNCHER_CAPABILITY.into(),
+            protocol_version: SYSTEMD_LAUNCHER_SERVICE_PROTOCOL_V1.into(),
+            launcher_request_identity: request_identity,
+            launcher_executable_identity: child.ota_binary_identity.clone(),
+            launcher_configuration_identity: launcher_configuration_identity.clone(),
+            launcher_service_binding_identity: launcher_service_binding_identity.clone(),
+            launcher_profile_identity: launcher_profile_identity.clone(),
+            runner_administrator_identity: runner_administrator_identity.clone(),
+            service_uid: 0,
+            service_gid: 0,
+            invocation_nonce_identity: invocation_nonce_identity.clone(),
+            boot_identity: boot_identity.clone(),
+            protected_launcher_instance_identity: launcher_instance.identity.clone(),
+            systemd_invocation_identity: scope.identity.clone(),
+            systemd_scope_identity: scope.identity.clone(),
+            cgroup_identity,
+            child_process_identity: child.identity.clone(),
+            principal_mapping_identity: principal_mapping.identity.clone(),
+            process_posture_identity: process_posture.identity.clone(),
+            implementation_subject_identity: implementation_subject_identity.clone(),
+            descriptors: descriptors.clone(),
+        };
+        capability.identity =
+            protected_launcher_capability_v1_identity(&capability).expect("capability identity");
+        let evidence = ProtectedLauncherCapabilityEvidenceV1 {
+            request: &request,
+            child: &child,
+            scope: &scope,
+            principal_mapping: &principal_mapping,
+            process_posture: &process_posture,
+            launcher_instance: &launcher_instance,
+            launcher_executable_identity: child.ota_binary_identity.as_str(),
+            launcher_configuration_identity: launcher_configuration_identity.as_str(),
+            launcher_service_binding_identity: launcher_service_binding_identity.as_str(),
+            launcher_profile_identity: launcher_profile_identity.as_str(),
+            runner_administrator_identity: runner_administrator_identity.as_str(),
+            service_uid: 0,
+            service_gid: 0,
+            invocation_nonce_identity: invocation_nonce_identity.as_str(),
+            boot_identity: boot_identity.as_str(),
+            implementation_subject_identity: implementation_subject_identity.as_str(),
+            observed_descriptors: descriptors.as_slice(),
+            verifier_store_bytes: VERIFIER_STORE_BYTES,
+            binding_store_bytes: BINDING_STORE_BYTES,
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&capability, &evidence),
+            Ok(())
+        );
+
+        let launcher_profile_v4 = systemd_launcher_profile_v4();
+        let launcher_profile_v4_identity = systemd_launcher_profile_identity(&launcher_profile_v4)
+            .expect("v4 launcher profile identity");
+        let mut launcher_instance_v4 = launcher_instance.clone();
+        launcher_instance_v4
+            .instance_v1
+            .systemd_launcher_profile_identity = launcher_profile_v4_identity.clone();
+        launcher_instance_v4.instance_v1.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(
+                &launcher_instance_v4.instance_v1,
+            )
+            .expect("v4 launcher foundation identity");
+        launcher_instance_v4.identity =
+            systemd_protected_launcher_instance_v2_identity(&launcher_instance_v4)
+                .expect("v4 launcher instance identity");
+
+        let mut v3_capability_with_v4_instance = capability.clone();
+        v3_capability_with_v4_instance.protected_launcher_instance_identity =
+            launcher_instance_v4.identity.clone();
+        v3_capability_with_v4_instance.identity =
+            protected_launcher_capability_v1_identity(&v3_capability_with_v4_instance)
+                .expect("recomputed V3 capability with substituted V4 instance");
+        let v3_evidence_with_v4_instance = ProtectedLauncherCapabilityEvidenceV1 {
+            launcher_instance: &launcher_instance_v4,
+            ..evidence
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(
+                &v3_capability_with_v4_instance,
+                &v3_evidence_with_v4_instance,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut capability_v4 = capability.clone();
+        capability_v4.launcher_profile_identity = launcher_profile_v4_identity.clone();
+        capability_v4.protected_launcher_instance_identity = launcher_instance_v4.identity.clone();
+        capability_v4.identity = protected_launcher_capability_v1_identity(&capability_v4)
+            .expect("v4 capability identity");
+        let evidence_v4 = ProtectedLauncherCapabilityEvidenceV1 {
+            launcher_instance: &launcher_instance_v4,
+            launcher_profile_identity: launcher_profile_v4_identity.as_str(),
+            ..evidence
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&capability_v4, &evidence_v4),
+            Ok(())
+        );
+
+        let mut v4_capability_with_v3_instance = capability_v4;
+        v4_capability_with_v3_instance.protected_launcher_instance_identity =
+            launcher_instance.identity.clone();
+        v4_capability_with_v3_instance.identity =
+            protected_launcher_capability_v1_identity(&v4_capability_with_v3_instance)
+                .expect("recomputed V4 capability with substituted V3 instance");
+        let v4_evidence_with_v3_instance = ProtectedLauncherCapabilityEvidenceV1 {
+            launcher_instance: &launcher_instance,
+            ..evidence_v4
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(
+                &v4_capability_with_v3_instance,
+                &v4_evidence_with_v3_instance,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut forged_child = child.clone();
+        forged_child.principal_mapping_identity = identity('0');
+        forged_child.identity =
+            launcher_child_process_identity(&forged_child).expect("forged child identity");
+        let mut forged_scope = scope.clone();
+        forged_scope.child_identity = forged_child.identity.clone();
+        forged_scope.identity =
+            launcher_systemd_scope_identity(&forged_scope).expect("forged scope identity");
+        let mut forged_instance = launcher_instance.clone();
+        forged_instance.instance_v1.child_process_identity = forged_child.identity.clone();
+        forged_instance.instance_v1.systemd_invocation_identity = forged_scope.identity.clone();
+        forged_instance.instance_v1.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(
+                &forged_instance.instance_v1,
+            )
+            .expect("forged launcher foundation identity");
+        forged_instance.identity =
+            systemd_protected_launcher_instance_v2_identity(&forged_instance)
+                .expect("forged launcher instance identity");
+        let mut forged_mapping_capability = capability.clone();
+        forged_mapping_capability.child_process_identity = forged_child.identity.clone();
+        forged_mapping_capability.systemd_invocation_identity = forged_scope.identity.clone();
+        forged_mapping_capability.systemd_scope_identity = forged_scope.identity.clone();
+        forged_mapping_capability.cgroup_identity =
+            protected_launcher_cgroup_v1_identity(&forged_scope, cgroup_descriptor)
+                .expect("forged cgroup identity");
+        forged_mapping_capability.protected_launcher_instance_identity =
+            forged_instance.identity.clone();
+        forged_mapping_capability.identity =
+            protected_launcher_capability_v1_identity(&forged_mapping_capability)
+                .expect("self-consistent forged capability identity");
+        let forged_mapping_evidence = ProtectedLauncherCapabilityEvidenceV1 {
+            child: &forged_child,
+            scope: &forged_scope,
+            launcher_instance: &forged_instance,
+            ..evidence
+        };
+        assert_eq!(
+            validate_protected_launcher_capability_v1(
+                &forged_mapping_capability,
+                &forged_mapping_evidence,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut substituted_cgroup = capability.clone();
+        substituted_cgroup.cgroup_identity = identity('d');
+        substituted_cgroup.identity =
+            protected_launcher_capability_v1_identity(&substituted_cgroup)
+                .expect("self-consistent substituted capability");
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&substituted_cgroup, &evidence),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut swapped_stores = capability.clone();
+        let verifier_index = swapped_stores
+            .descriptors
+            .iter()
+            .position(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore
+            })
+            .expect("verifier descriptor");
+        let binding_index = swapped_stores
+            .descriptors
+            .iter()
+            .position(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore
+            })
+            .expect("binding descriptor");
+        swapped_stores.descriptors[verifier_index].role =
+            ProtectedLauncherDescriptorRoleV1::BindingStore;
+        swapped_stores.descriptors[binding_index].role =
+            ProtectedLauncherDescriptorRoleV1::VerifierStore;
+        for descriptor in &mut swapped_stores.descriptors {
+            descriptor.identity = protected_launcher_descriptor_v1_identity(descriptor)
+                .expect("self-consistent swapped descriptor");
+        }
+        swapped_stores.identity = protected_launcher_capability_v1_identity(&swapped_stores)
+            .expect("self-consistent swapped capability");
+        assert_eq!(
+            validate_protected_launcher_capability_v1(&swapped_stores, &evidence),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let cgroup = capability
+            .descriptors
+            .iter()
+            .find(|descriptor| {
+                descriptor.role == ProtectedLauncherDescriptorRoleV1::InvocationCgroup
+            })
+            .expect("cgroup descriptor")
+            .clone();
+        let mut writable_cgroup = cgroup;
+        writable_cgroup.mode = 0o777;
+        assert_eq!(
+            protected_launcher_descriptor_v1_identity(&writable_cgroup),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        let mut aliased_stores = capability;
+        let verifier = aliased_stores
+            .descriptors
+            .iter()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::VerifierStore)
+            .expect("verifier descriptor")
+            .clone();
+        let binding = aliased_stores
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.role == ProtectedLauncherDescriptorRoleV1::BindingStore)
+            .expect("binding descriptor");
+        binding.device = verifier.device;
+        binding.inode = verifier.inode;
+        binding.identity = protected_launcher_descriptor_v1_identity(binding)
+            .expect("aliased descriptor identity");
+        assert_eq!(
+            protected_launcher_capability_v1_identity(&aliased_stores),
+            Err(ProtocolError::InvalidRecord)
         );
     }
 
@@ -3702,6 +9909,7 @@ mod tests {
             identity: String::new(),
             message_kind: LAUNCHER_STARTUP_CONTINUATION.into(),
             invocation_id: child.invocation_id.clone(),
+            launcher_request_identity: child.request_identity.clone(),
             child_process_identity: child.identity.clone(),
             working_directory_identity: child.working_directory_identity.clone(),
             process_posture_identity: identity('e'),
@@ -3719,6 +9927,13 @@ mod tests {
         assert_ne!(
             launcher_startup_continuation_identity(&changed_posture)
                 .expect("changed continuation identity"),
+            continuation.identity
+        );
+        let mut changed_launcher_request = continuation.clone();
+        changed_launcher_request.launcher_request_identity = identity('0');
+        assert_ne!(
+            launcher_startup_continuation_identity(&changed_launcher_request)
+                .expect("changed launcher-request identity"),
             continuation.identity
         );
         let mut unknown_kind = continuation;
@@ -3761,6 +9976,18 @@ mod tests {
             launcher_systemd_scope_identity(&changed_scope).expect("changed scope identity"),
             scope.identity
         );
+        for alias in [
+            format!("//{}/{}", scope.slice, scope.unit_name),
+            format!("/{}/./{}", scope.slice, scope.unit_name),
+            format!("/{}/{}/", scope.slice, scope.unit_name),
+        ] {
+            let mut aliased_scope = scope.clone();
+            aliased_scope.control_group = alias;
+            assert_eq!(
+                launcher_systemd_scope_identity(&aliased_scope),
+                Err(ProtocolError::InvalidRecord)
+            );
+        }
         let mut invalid_scope = scope;
         invalid_scope.delegate = true;
         assert_eq!(
@@ -4708,6 +10935,62 @@ mod tests {
             b"ota.authority-launcher.finalization-recovery-request.v1\0"
         );
         assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_NONCE_IDENTITY_DOMAIN_V1,
+            b"ota.protected-authority-snapshot-nonce.v1\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_CHALLENGE_IDENTITY_DOMAIN_V1,
+            b"ota.protected-authority-snapshot-challenge.v1\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V1,
+            b"ota.protected-authority-snapshot-request.v1\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V1,
+            b"ota.protected-authority-snapshot.v1\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V1,
+            b"ota.protected-authority-snapshot-response.v1\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_REQUEST_IDENTITY_DOMAIN_V2,
+            b"ota.protected-authority-snapshot-request.v2\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_IDENTITY_DOMAIN_V2,
+            b"ota.protected-authority-snapshot.v2\0"
+        );
+        assert_eq!(
+            PROTECTED_AUTHORITY_SNAPSHOT_RESPONSE_IDENTITY_DOMAIN_V2,
+            b"ota.protected-authority-snapshot-response.v2\0"
+        );
+        assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V2,
+            b"ota.protected-launcher-secret-delivery-transaction-binding-request.v2\0"
+        );
+        assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V2,
+            b"ota.protected-launcher-secret-delivery-transaction-binding.v2\0"
+        );
+        assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V3,
+            b"ota.protected-launcher-secret-delivery-transaction-binding-request.v3\0"
+        );
+        assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V3,
+            b"ota.protected-launcher-secret-delivery-transaction-binding.v3\0"
+        );
+        assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_REQUEST_IDENTITY_DOMAIN_V4,
+            b"ota.protected-launcher-secret-delivery-transaction-binding-request.v4\0"
+        );
+        assert_eq!(
+            PROTECTED_LAUNCHER_SECRET_DELIVERY_TRANSACTION_BINDING_IDENTITY_DOMAIN_V4,
+            b"ota.protected-launcher-secret-delivery-transaction-binding.v4\0"
+        );
+        assert_eq!(
             [
                 CHALLENGE_REQUEST_DOMAIN_V1,
                 ATTESTATION_RESPONSE_DOMAIN_V1,
@@ -4745,6 +11028,57 @@ mod tests {
             )
             .expect("work unit"),
             "sha256:7a56b64f47af50db7d230e88681a8b86efa38ba1cc5bd6d9d905d3ce2d1fd009"
+        );
+
+        let snapshot_request = authority_snapshot_request();
+        let snapshot_response = authority_snapshot_response(&snapshot_request);
+        let snapshot_request_v2 = authority_snapshot_request_v2();
+        let snapshot_response_v2 = authority_snapshot_response_v2(&snapshot_request_v2);
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let binding_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
+        let binding_response =
+            secret_delivery_transaction_binding_response_v2(&binding_request, &evidence);
+        let prelude =
+            same_child_capability_prelude(&secret_delivery_startup_continuation(), &evidence);
+        assert_eq!(
+            snapshot_request.challenge.identity,
+            "sha256:d446bf13e476b7d9b29ef98426b08a370f2c22c6cfc49e24039840635fd2f56f"
+        );
+        assert_eq!(
+            snapshot_request.identity,
+            "sha256:0c75b2c6fceed72de07d74a56fec31fa293690d52c773b4fe3fd279a7b3910fd"
+        );
+        assert_eq!(
+            snapshot_response.protected_snapshot_identity,
+            "sha256:29cc9533ae29ea5d8cb89e5ddd4bd093aefd0cc4889b6db3a9dbda2c189fdd12"
+        );
+        assert_eq!(
+            snapshot_response.identity,
+            "sha256:f8590c6da80208f4b3cd402b9474fe25a08ee2aa99acb4706d7ffb6d11bc4a13"
+        );
+        assert_eq!(
+            snapshot_request_v2.identity,
+            "sha256:eb2ed33954601d10e42848b36b062dcf040056bef074e993bb2f1c384be88646"
+        );
+        assert_eq!(
+            snapshot_response_v2.protected_snapshot_identity,
+            "sha256:06c8ec55edb9cadda1743dbed05bc30640799959647014b7219ee20be27bd69a"
+        );
+        assert_eq!(
+            snapshot_response_v2.identity,
+            "sha256:eb168ef10ec601fab734a525df5f6bd0d42791491125794f1024b031fb82f794"
+        );
+        assert_eq!(
+            prelude.identity,
+            "sha256:50f07cfa07ecc3814edf03a885f6ec9461eb20a29a7f700d1ef493082ec977bb"
+        );
+        assert_eq!(
+            binding_request.identity,
+            "sha256:a1d6f7d7281422365c5b1e257c4ba4f2ea8a4ddb9e2b202dcdaaf4fee79af398"
+        );
+        assert_eq!(
+            binding_response.binding.identity,
+            "sha256:649d32d023eb063851c5af047da4ec1364141403124f2200876f779861b1ea84"
         );
     }
 
@@ -4810,6 +11144,7 @@ mod tests {
         let launcher = systemd_launcher_profile_v1();
         let separated_producer = systemd_launcher_profile_v2();
         let process_inspection = systemd_launcher_profile_v3();
+        let boot_observation = systemd_launcher_profile_v4();
         let principal = systemd_job_principal_profile_v1();
         let systemd_principal = systemd_job_principal_profile_v2();
 
@@ -4850,6 +11185,47 @@ mod tests {
             systemd_launcher_profile_by_id(SYSTEMD_LAUNCHER_PROFILE_ID_V3),
             Some(process_inspection.clone())
         );
+        assert_eq!(boot_observation.profile_id, SYSTEMD_LAUNCHER_PROFILE_ID_V4);
+        assert!(boot_observation.service_settings.iter().any(|setting| {
+            setting.name == "OpenFile"
+                && setting.value == "/proc/sys/kernel/random/boot_id:ota-boot-id:read-only"
+        }));
+        assert!(boot_observation.socket_settings.iter().any(|setting| {
+            setting.name == "FileDescriptorName" && setting.value == "ota-launcher-listener"
+        }));
+        assert!(
+            boot_observation
+                .service_settings
+                .iter()
+                .any(|setting| { setting.name == "ProcSubset" && setting.value == "pid" })
+        );
+        assert_ne!(
+            systemd_launcher_profile_identity(&process_inspection)
+                .expect("v3 launcher profile identity"),
+            systemd_launcher_profile_identity(&boot_observation)
+                .expect("v4 launcher profile identity")
+        );
+        assert_eq!(
+            systemd_launcher_profile_by_id(SYSTEMD_LAUNCHER_PROFILE_ID_V4),
+            Some(boot_observation.clone())
+        );
+        let mut v4_without_additions = boot_observation.clone();
+        v4_without_additions.profile_id = SYSTEMD_LAUNCHER_PROFILE_ID_V3.into();
+        assert_eq!(
+            v4_without_additions
+                .service_settings
+                .pop()
+                .map(|setting| setting.name),
+            Some("OpenFile".into())
+        );
+        assert_eq!(
+            v4_without_additions
+                .socket_settings
+                .pop()
+                .map(|setting| setting.name),
+            Some("FileDescriptorName".into())
+        );
+        assert_eq!(v4_without_additions, process_inspection);
         assert_eq!(principal.schema_version, 1);
         assert_eq!(principal.profile_id, SYSTEMD_JOB_PRINCIPAL_PROFILE_ID_V1);
         assert_eq!(principal.requirements.len(), 18);
@@ -4887,6 +11263,11 @@ mod tests {
             systemd_launcher_profile_identity(&process_inspection)
                 .expect("process-inspection profile identity"),
             "sha256:1d0ef44c24b6ec21dc0c462edd52c5197ae35a4a1728a98cd93b92d6f106dfaf"
+        );
+        assert_eq!(
+            systemd_launcher_profile_identity(&boot_observation)
+                .expect("boot-observation profile identity"),
+            "sha256:bdac5f965aa56d44de8581e194ac0364b2d4c98183fff0cbb223574fd78197a8"
         );
         assert_eq!(
             principal_identity,
@@ -5213,6 +11594,38 @@ mod tests {
         };
         complete_v3.identity = systemd_protected_launcher_instance_v2_identity(&complete_v3)
             .expect("complete v3 launcher instance identity");
+        let launcher_profile_v4 = systemd_launcher_profile_v4();
+        let mut complete_v4 = complete_v3.clone();
+        complete_v4.instance_v1.systemd_launcher_profile_identity =
+            systemd_launcher_profile_identity(&launcher_profile_v4)
+                .expect("v4 launcher profile identity");
+        complete_v4.instance_v1.identity =
+            systemd_protected_launcher_instance_v3_foundation_identity(&complete_v4.instance_v1)
+                .expect("v4 launcher foundation identity");
+        complete_v4.launcher_observations = launcher_profile_v4
+            .evidence_sources
+            .into_iter()
+            .map(|source| SystemdLauncherObservation {
+                source,
+                state: RuntimeBoundaryObservationState::Verified,
+                reason_code: String::from("verified_by_systemd_protected_launcher"),
+                evidence_identity: Some(format!("sha256:{}", "5".repeat(64))),
+            })
+            .collect();
+        complete_v4.identity = systemd_protected_launcher_instance_v2_identity(&complete_v4)
+            .expect("complete v4 launcher instance identity");
+        validate_systemd_protected_launcher_instance_v3(&complete_v4)
+            .expect("v4 profile remains valid in the v3 attestation envelope");
+        let mut unknown_profile = complete_v4.clone();
+        unknown_profile
+            .instance_v1
+            .systemd_launcher_profile_identity = format!("sha256:{}", "f".repeat(64));
+        assert_eq!(
+            systemd_protected_launcher_instance_v3_foundation_identity(
+                &unknown_profile.instance_v1
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
         let mut stripped_current = complete_v3.clone();
         stripped_current.launcher_observations[0].evidence_identity = None;
         assert!(systemd_protected_launcher_instance_v2_identity(&stripped_current).is_err());
@@ -5685,6 +12098,349 @@ mod tests {
                 "{kind} identity drifted"
             );
         }
+
+        // These private records are still Protocol wire contracts. Lock their closed field
+        // shapes here with the established public wire types rather than relying on callers.
+        let snapshot_request = authority_snapshot_request();
+        let snapshot_response = authority_snapshot_response(&snapshot_request);
+        let snapshot_request_v2 = authority_snapshot_request_v2();
+        let snapshot_response_v2 = authority_snapshot_response_v2(&snapshot_request_v2);
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let binding_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
+        let binding_response =
+            secret_delivery_transaction_binding_response_v2(&binding_request, &evidence);
+        let binding_request_v3 = secret_delivery_transaction_binding_request_v3(&snapshot_response);
+        let binding_response_v3 =
+            secret_delivery_transaction_binding_response_v3(&binding_request_v3, &evidence);
+        let binding_request_v4 =
+            secret_delivery_transaction_binding_request_v4(&snapshot_response_v2);
+        let binding_response_v4 =
+            secret_delivery_transaction_binding_response_v4(&binding_request_v4, &evidence);
+        let prelude =
+            same_child_capability_prelude(&secret_delivery_startup_continuation(), &evidence);
+        let assert_keys = |value: serde_json::Value, expected: &[&str]| {
+            let actual = value
+                .as_object()
+                .expect("wire object")
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected);
+        };
+        assert_keys(
+            serde_json::to_value(&snapshot_request.challenge).expect("challenge wire"),
+            &[
+                "expires_at_unix_seconds",
+                "identity",
+                "issued_at_unix_seconds",
+                "message_kind",
+                "nonce_commitment",
+                "schema_version",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_request).expect("request wire"),
+            &[
+                "challenge",
+                "contract_identity",
+                "identity",
+                "launcher_request_identity",
+                "message_kind",
+                "nonce",
+                "schema_version",
+                "selected_execution_graph_identity",
+                "session_identity",
+                "startup_continuation_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_response.payload).expect("payload wire"),
+            &[
+                "binding_bundle",
+                "binding_store_bytes",
+                "binding_store_descriptor",
+                "contract_identity",
+                "launcher_request_identity",
+                "record_kind",
+                "request_identity",
+                "schema_version",
+                "selected_execution_graph_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "verifier_store",
+                "verifier_store_bytes",
+                "verifier_store_descriptor",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_response).expect("response wire"),
+            &[
+                "identity",
+                "message_kind",
+                "payload",
+                "protected_snapshot_identity",
+                "request_identity",
+                "schema_version",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_request_v2).expect("V2 request wire"),
+            &[
+                "challenge",
+                "contract_identity",
+                "identity",
+                "launcher_request_identity",
+                "message_kind",
+                "nonce",
+                "schema_version",
+                "selected_execution_graph_identity",
+                "session_identity",
+                "startup_continuation_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_response_v2.payload).expect("V2 payload wire"),
+            &[
+                "binding_store_bytes",
+                "binding_store_descriptor",
+                "contract_identity",
+                "launcher_request_identity",
+                "record_kind",
+                "request_identity",
+                "schema_version",
+                "selected_execution_graph_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "verifier_store_bytes",
+                "verifier_store_descriptor",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&snapshot_response_v2).expect("V2 response wire"),
+            &[
+                "identity",
+                "message_kind",
+                "payload",
+                "protected_snapshot_identity",
+                "request_identity",
+                "schema_version",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_request).expect("binding request wire"),
+            &[
+                "identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation",
+                "protected_snapshot_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&prelude).expect("same-child prelude wire"),
+            &[
+                "expires_at_unix_seconds",
+                "identity",
+                "installation_evidence_identity",
+                "launcher_request_identity",
+                "observation_request_identity",
+                "projection_identity",
+                "protected_capability_identity",
+                "record_kind",
+                "schema_version",
+                "session_identity",
+                "startup_continuation_identity",
+                "verifier_identity",
+            ],
+        );
+        let mut unknown_prelude = serde_json::to_value(&prelude).expect("same-child prelude JSON");
+        unknown_prelude
+            .as_object_mut()
+            .expect("same-child prelude object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(
+            serde_json::from_value::<ProtectedSameChildCapabilityPreludeV1>(unknown_prelude)
+                .is_err()
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response.binding).expect("binding wire"),
+            &[
+                "expires_at_unix_seconds",
+                "identity",
+                "installation_evidence_identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation_request_identity",
+                "projection_identity",
+                "protected_capability_identity",
+                "protected_snapshot_identity",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "verifier_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response).expect("binding response wire"),
+            &[
+                "binding",
+                "message_kind",
+                "projection",
+                "protected_snapshot_identity",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_request_v3).expect("v3 binding request wire"),
+            &[
+                "identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation",
+                "protected_snapshot_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "transport_dependency_record_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response_v3.binding).expect("v3 binding wire"),
+            &[
+                "expires_at_unix_seconds",
+                "identity",
+                "installation_evidence_identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation_request_identity",
+                "projection_identity",
+                "protected_capability_identity",
+                "protected_snapshot_identity",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "transport_dependency_record_identity",
+                "verifier_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response_v3).expect("v3 binding response wire"),
+            &[
+                "binding",
+                "message_kind",
+                "projection",
+                "protected_snapshot_identity",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_request_v4).expect("V4 binding request wire"),
+            &[
+                "identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation",
+                "protected_snapshot_identity",
+                "protected_snapshot_record_kind",
+                "protected_snapshot_schema_version",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "transport_dependency_record_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response_v4.binding).expect("V4 binding wire"),
+            &[
+                "expires_at_unix_seconds",
+                "identity",
+                "installation_evidence_identity",
+                "launcher_request_identity",
+                "message_kind",
+                "observation_request_identity",
+                "projection_identity",
+                "protected_capability_identity",
+                "protected_snapshot_identity",
+                "protected_snapshot_record_kind",
+                "protected_snapshot_schema_version",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+                "secret_transaction_candidate_identity",
+                "session_identity",
+                "startup_continuation_identity",
+                "transport_dependency_record_identity",
+                "verifier_identity",
+            ],
+        );
+        assert_keys(
+            serde_json::to_value(&binding_response_v4).expect("V4 binding response wire"),
+            &[
+                "binding",
+                "message_kind",
+                "projection",
+                "protected_snapshot_identity",
+                "protected_snapshot_record_kind",
+                "protected_snapshot_schema_version",
+                "request_identity",
+                "same_child_capability_prelude_identity",
+                "schema_version",
+            ],
+        );
+        for (name, mut value) in [
+            (
+                "request",
+                serde_json::to_value(&binding_request_v3).expect("v3 request JSON"),
+            ),
+            (
+                "binding",
+                serde_json::to_value(&binding_response_v3.binding).expect("v3 binding JSON"),
+            ),
+            (
+                "response",
+                serde_json::to_value(&binding_response_v3).expect("v3 response JSON"),
+            ),
+        ] {
+            value
+                .as_object_mut()
+                .expect("v3 wire object")
+                .insert("unknown".into(), serde_json::Value::Bool(true));
+            let rejected = match name {
+                "request" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+                >(value)
+                .is_err(),
+                "binding" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingV3,
+                >(value)
+                .is_err(),
+                "response" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingResponseV3,
+                >(value)
+                .is_err(),
+                _ => unreachable!(),
+            };
+            assert!(rejected, "unknown V3 {name} fields must refuse");
+        }
     }
 
     #[test]
@@ -5763,6 +12519,961 @@ mod tests {
             consumed_json
                 .pointer("/payload/status/consume_response")
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn protected_authority_snapshot_is_private_exact_and_required_by_v2_binding() {
+        let continuation = secret_delivery_startup_continuation();
+        let snapshot_request = authority_snapshot_request();
+        let snapshot_response = authority_snapshot_response(&snapshot_request);
+        reconcile_protected_authority_snapshot_response_v1(
+            &snapshot_request,
+            &snapshot_response,
+            &continuation,
+            snapshot_request.challenge.issued_at_unix_seconds,
+        )
+        .expect("exact snapshot response reconciles");
+
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+        let response = secret_delivery_transaction_binding_response_v2(&request, &evidence);
+        validate_protected_same_child_capability_prelude_v1(&prelude)
+            .expect("same-child prelude is structurally valid");
+        reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+            &request,
+            &response,
+            &snapshot_request,
+            &snapshot_response,
+            &continuation,
+            &prelude,
+            &evidence,
+            snapshot_request.challenge.issued_at_unix_seconds,
+        )
+        .expect("snapshot-bound v2 binding reconciles");
+
+        let assert_self_consistent_prelude_refuses =
+            |mut substituted_prelude: ProtectedSameChildCapabilityPreludeV1| {
+                substituted_prelude.identity =
+                    protected_same_child_capability_prelude_v1_identity(&substituted_prelude)
+                        .expect("self-consistent substituted prelude identity");
+                let mut substituted_request = request.clone();
+                substituted_request.same_child_capability_prelude_identity =
+                    substituted_prelude.identity.clone();
+                substituted_request.identity =
+                    protected_launcher_secret_delivery_transaction_binding_request_v2_identity(
+                        &substituted_request,
+                    )
+                    .expect("self-consistent substituted prelude request identity");
+                let mut substituted_response = response.clone();
+                substituted_response.request_identity = substituted_request.identity.clone();
+                substituted_response.same_child_capability_prelude_identity =
+                    substituted_prelude.identity.clone();
+                substituted_response.binding.request_identity =
+                    substituted_request.identity.clone();
+                substituted_response
+                    .binding
+                    .same_child_capability_prelude_identity = substituted_prelude.identity.clone();
+                substituted_response.binding.identity =
+                    protected_launcher_secret_delivery_transaction_binding_v2_identity(
+                        &substituted_response.binding,
+                    )
+                    .expect("self-consistent substituted prelude binding identity");
+                assert_eq!(
+                    reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+                        &substituted_request,
+                        &substituted_response,
+                        &snapshot_request,
+                        &snapshot_response,
+                        &continuation,
+                        &substituted_prelude,
+                        &evidence,
+                        snapshot_request.challenge.issued_at_unix_seconds,
+                    ),
+                    Err(ProtocolError::InvalidRecord),
+                    "a self-consistent prelude substitution cannot cross the retained V2 boundary"
+                );
+            };
+
+        for field in [
+            "observation",
+            "projection",
+            "protected_capability",
+            "verifier",
+            "installation_evidence",
+            "launcher_request",
+            "startup_continuation",
+            "expiry",
+        ] {
+            let mut substituted = prelude.clone();
+            match field {
+                "observation" => {
+                    substituted.observation_request_identity = format!("sha256:{}", "a".repeat(64));
+                }
+                "projection" => {
+                    substituted.projection_identity = format!("sha256:{}", "b".repeat(64));
+                }
+                "protected_capability" => {
+                    substituted.protected_capability_identity =
+                        format!("sha256:{}", "c".repeat(64));
+                }
+                "verifier" => {
+                    substituted.verifier_identity = format!("sha256:{}", "d".repeat(64));
+                }
+                "installation_evidence" => {
+                    substituted.installation_evidence_identity =
+                        format!("sha256:{}", "e".repeat(64));
+                }
+                "launcher_request" => {
+                    substituted.launcher_request_identity = format!("sha256:{}", "f".repeat(64));
+                }
+                "startup_continuation" => {
+                    substituted.startup_continuation_identity =
+                        format!("sha256:{}", "0".repeat(64));
+                    substituted.session_identity =
+                        protected_launcher_secret_delivery_transaction_session_v1_identity(
+                            substituted.startup_continuation_identity.as_str(),
+                        )
+                        .expect("self-consistent substituted prelude session identity");
+                }
+                "expiry" => {
+                    substituted.expires_at_unix_seconds += 1;
+                }
+                _ => unreachable!("table contains only declared prelude fields"),
+            }
+            assert_self_consistent_prelude_refuses(substituted);
+        }
+
+        let mut substituted_prelude = prelude.clone();
+        substituted_prelude.protected_capability_identity = format!("sha256:{}", "f".repeat(64));
+        substituted_prelude.identity =
+            protected_same_child_capability_prelude_v1_identity(&substituted_prelude)
+                .expect("self-consistent substituted prelude identity");
+        let mut substituted_prelude_request = request.clone();
+        substituted_prelude_request.same_child_capability_prelude_identity =
+            substituted_prelude.identity.clone();
+        substituted_prelude_request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v2_identity(
+                &substituted_prelude_request,
+            )
+            .expect("self-consistent substituted prelude request identity");
+        let mut substituted_prelude_response = response.clone();
+        substituted_prelude_response.request_identity =
+            substituted_prelude_request.identity.clone();
+        substituted_prelude_response.same_child_capability_prelude_identity =
+            substituted_prelude.identity.clone();
+        substituted_prelude_response.binding.request_identity =
+            substituted_prelude_request.identity.clone();
+        substituted_prelude_response
+            .binding
+            .same_child_capability_prelude_identity = substituted_prelude.identity.clone();
+        substituted_prelude_response.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v2_identity(
+                &substituted_prelude_response.binding,
+            )
+            .expect("self-consistent substituted prelude binding identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+                &substituted_prelude_request,
+                &substituted_prelude_response,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &substituted_prelude,
+                &evidence,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent prelude cannot substitute its retained protected capability"
+        );
+
+        let mut substituted_capability = response.clone();
+        substituted_capability.binding.protected_capability_identity =
+            format!("sha256:{}", "e".repeat(64));
+        substituted_capability.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v2_identity(
+                &substituted_capability.binding,
+            )
+            .expect("self-consistent substituted capability binding identity");
+        reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+            &request,
+            &substituted_capability,
+            &snapshot_request,
+            &snapshot_response,
+            &continuation,
+            &prelude,
+            &evidence.verifier,
+            &evidence.installation_evidence_identity,
+            snapshot_request.challenge.issued_at_unix_seconds,
+        )
+        .expect("the public response shape alone cannot establish protected capability provenance");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_v2(
+                &request,
+                &substituted_capability,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent substituted protected capability cannot cross the Launcher boundary"
+        );
+
+        let mut substituted = snapshot_response.clone();
+        substituted.payload.contract_identity = format!("sha256:{}", "d".repeat(64));
+        reidentify_authority_snapshot_response(&mut substituted);
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+                &request,
+                &response,
+                &snapshot_request,
+                &substituted,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent snapshot substitution cannot satisfy the retained V2 request"
+        );
+
+        let mut wrong_size = snapshot_response.clone();
+        wrong_size.payload.verifier_store_descriptor.size += 1;
+        wrong_size.payload.verifier_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(
+                &wrong_size.payload.verifier_store_descriptor,
+            )
+            .expect("self-consistent descriptor identity");
+        assert_eq!(
+            protected_authority_snapshot_payload_v1_identity(&wrong_size.payload),
+            Err(ProtocolError::InvalidRecord),
+            "descriptor size must bind the exact transferred store bytes"
+        );
+
+        let mut aliased = snapshot_response.clone();
+        aliased.payload.binding_store_descriptor.device =
+            aliased.payload.verifier_store_descriptor.device;
+        aliased.payload.binding_store_descriptor.inode =
+            aliased.payload.verifier_store_descriptor.inode;
+        aliased.payload.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&aliased.payload.binding_store_descriptor)
+                .expect("self-consistent alias descriptor identity");
+        assert_eq!(
+            protected_authority_snapshot_payload_v1_identity(&aliased.payload),
+            Err(ProtocolError::InvalidRecord),
+            "the two protected store roles must retain distinct files"
+        );
+
+        let mut stale_request = request.clone();
+        stale_request.observation.challenge.expires_at_unix_seconds =
+            stale_request.observation.challenge.issued_at_unix_seconds + 1;
+        stale_request.observation.challenge.identity =
+            protected_launcher_capability_observation_challenge_v1_identity(
+                &stale_request.observation.challenge,
+            )
+            .expect("stale observation challenge identity");
+        stale_request.observation.identity =
+            protected_launcher_capability_observation_request_v1_identity(
+                &stale_request.observation,
+            )
+            .expect("stale observation request identity");
+        stale_request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v2_identity(
+                &stale_request,
+            )
+            .expect("stale v2 request identity");
+        let mut stale_response = response.clone();
+        stale_response.request_identity = stale_request.identity.clone();
+        stale_response.binding.request_identity = stale_request.identity.clone();
+        stale_response.binding.observation_request_identity =
+            stale_request.observation.identity.clone();
+        stale_response.binding.expires_at_unix_seconds =
+            stale_request.observation.challenge.expires_at_unix_seconds;
+        stale_response.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v2_identity(
+                &stale_response.binding,
+            )
+            .expect("stale v2 binding identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v2(
+                &stale_request,
+                &stale_response,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                snapshot_request.challenge.issued_at_unix_seconds + 2,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a stale capability-observation challenge cannot satisfy a fresh snapshot exchange"
+        );
+
+        let mut unknown = serde_json::to_value(&snapshot_response.payload).expect("snapshot JSON");
+        unknown
+            .as_object_mut()
+            .expect("snapshot object")
+            .insert("unknown".into(), serde_json::Value::Bool(true));
+        assert!(serde_json::from_value::<ProtectedAuthoritySnapshotPayloadV1>(unknown).is_err());
+    }
+
+    #[test]
+    fn protected_authority_snapshot_v2_retains_canonical_stores_once() {
+        let continuation = secret_delivery_startup_continuation();
+        let request = authority_snapshot_request_v2();
+        let response = authority_snapshot_response_v2(&request);
+        reconcile_protected_authority_snapshot_response_v2(
+            &request,
+            &response,
+            &continuation,
+            request.challenge.issued_at_unix_seconds,
+        )
+        .expect("V2 snapshot response reconciles");
+        assert!(
+            serde_jcs::to_vec(&response)
+                .expect("canonical V2 response")
+                .len()
+                <= MAX_FRAME_BYTES - std::mem::size_of::<u32>(),
+            "the V2 response remains one frame including its four-byte prefix"
+        );
+
+        assert!(
+            validate_protected_authority_snapshot_response_v2_frame_size(
+                MAX_FRAME_BYTES - std::mem::size_of::<u32>(),
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_protected_authority_snapshot_response_v2_frame_size(
+                MAX_FRAME_BYTES - std::mem::size_of::<u32>() + 1,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a response larger than one framed V2 message refuses"
+        );
+
+        let mut noncanonical = response.payload.clone();
+        let mut bytes = URL_SAFE_NO_PAD
+            .decode(noncanonical.binding_store_bytes.as_bytes())
+            .expect("binding store bytes");
+        bytes.push(b'\n');
+        noncanonical.binding_store_bytes = URL_SAFE_NO_PAD.encode(bytes);
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&noncanonical),
+            Err(ProtocolError::InvalidRecord),
+            "a semantically equivalent but noncanonical raw store is not a V2 carrier"
+        );
+
+        let mut verifier_noncanonical = response.payload.clone();
+        let mut verifier_bytes = URL_SAFE_NO_PAD
+            .decode(verifier_noncanonical.verifier_store_bytes.as_bytes())
+            .expect("verifier store bytes");
+        verifier_bytes.push(b'\n');
+        verifier_noncanonical.verifier_store_bytes = URL_SAFE_NO_PAD.encode(verifier_bytes);
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&verifier_noncanonical),
+            Err(ProtocolError::InvalidRecord),
+            "the verifier store must also be canonical JCS"
+        );
+
+        let mut duplicate_key = response.payload.clone();
+        let binding_bytes = URL_SAFE_NO_PAD
+            .decode(duplicate_key.binding_store_bytes.as_bytes())
+            .expect("binding store bytes");
+        let mut duplicate_json = String::from_utf8(binding_bytes).expect("binding JSON");
+        duplicate_json.insert_str(
+            duplicate_json.len() - 1,
+            ",\"identity\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+        );
+        duplicate_key.binding_store_bytes = URL_SAFE_NO_PAD.encode(duplicate_json.as_bytes());
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&duplicate_key),
+            Err(ProtocolError::InvalidRecord),
+            "duplicate JSON keys cannot bypass raw canonical-store equality"
+        );
+
+        let mut malformed_base64 = response.payload.clone();
+        malformed_base64.binding_store_bytes = "!".into();
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&malformed_base64),
+            Err(ProtocolError::InvalidRecord),
+            "malformed protected store bytes refuse"
+        );
+
+        let mut role_substitution = response.payload.clone();
+        role_substitution.binding_store_descriptor.role =
+            ProtectedLauncherDescriptorRoleV1::VerifierStore;
+        role_substitution.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&role_substitution.binding_store_descriptor)
+                .expect("reidentified substituted role");
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&role_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "descriptor roles are not interchangeable"
+        );
+
+        let mut inode_substitution = response.payload.clone();
+        inode_substitution.binding_store_descriptor.device =
+            inode_substitution.verifier_store_descriptor.device;
+        inode_substitution.binding_store_descriptor.inode =
+            inode_substitution.verifier_store_descriptor.inode;
+        inode_substitution.binding_store_descriptor.identity =
+            protected_launcher_descriptor_v1_identity(&inode_substitution.binding_store_descriptor)
+                .expect("reidentified substituted inode");
+        assert_eq!(
+            protected_authority_snapshot_payload_v2_identity(&inode_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "the two retained stores require distinct filesystem identities"
+        );
+
+        let mut recomputed_context_substitution = response.clone();
+        recomputed_context_substitution.payload.contract_identity =
+            format!("sha256:{}", "c".repeat(64));
+        reidentify_authority_snapshot_response_v2(&mut recomputed_context_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &recomputed_context_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent payload from another contract cannot satisfy the retained request"
+        );
+
+        let mut request_substitution = response.clone();
+        request_substitution.request_identity = format!("sha256:{}", "d".repeat(64));
+        request_substitution.payload.request_identity =
+            request_substitution.request_identity.clone();
+        reidentify_authority_snapshot_response_v2(&mut request_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &request_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response cannot substitute its retained request"
+        );
+
+        let mut schema_substitution = response.clone();
+        schema_substitution.payload.schema_version = 1;
+        reidentify_authority_snapshot_response_v2_unchecked(&mut schema_substitution);
+        assert_eq!(
+            protected_authority_snapshot_response_v2_identity(&schema_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent V1 payload cannot enter a V2 response"
+        );
+
+        let mut kind_substitution = response.clone();
+        kind_substitution.payload.record_kind = PROTECTED_AUTHORITY_SNAPSHOT.into();
+        reidentify_authority_snapshot_response_v2_unchecked(&mut kind_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &kind_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response with another payload kind refuses"
+        );
+
+        let mut descriptor_role_substitution = response.clone();
+        descriptor_role_substitution
+            .payload
+            .binding_store_descriptor
+            .role = ProtectedLauncherDescriptorRoleV1::VerifierStore;
+        descriptor_role_substitution
+            .payload
+            .binding_store_descriptor
+            .identity = protected_launcher_descriptor_v1_identity(
+            &descriptor_role_substitution
+                .payload
+                .binding_store_descriptor,
+        )
+        .expect("reidentified substituted descriptor role");
+        reidentify_authority_snapshot_response_v2_unchecked(&mut descriptor_role_substitution);
+        assert_eq!(
+            protected_authority_snapshot_response_v2_identity(&descriptor_role_substitution),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response cannot substitute a descriptor role"
+        );
+
+        let mut descriptor_identity_substitution = response.clone();
+        descriptor_identity_substitution
+            .payload
+            .binding_store_descriptor
+            .identity = format!("sha256:{}", "e".repeat(64));
+        reidentify_authority_snapshot_response_v2_unchecked(&mut descriptor_identity_substitution);
+        assert_eq!(
+            reconcile_protected_authority_snapshot_response_v2(
+                &request,
+                &descriptor_identity_substitution,
+                &continuation,
+                request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a self-consistent response cannot substitute a descriptor identity"
+        );
+
+        let mut v1_fallback = request.clone();
+        v1_fallback.schema_version = 1;
+        v1_fallback.message_kind = PROTECTED_AUTHORITY_SNAPSHOT_REQUEST.into();
+        assert_eq!(
+            protected_authority_snapshot_request_v2_identity(&v1_fallback),
+            Err(ProtocolError::InvalidRecord),
+            "V2 cannot reinterpret a V1 request"
+        );
+    }
+
+    #[test]
+    fn v3_binding_requires_exact_transport_dependency_record_identity() {
+        let continuation = secret_delivery_startup_continuation();
+        let snapshot_request = authority_snapshot_request();
+        let snapshot_response = authority_snapshot_response(&snapshot_request);
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let request = secret_delivery_transaction_binding_request_v3(&snapshot_response);
+        let response = secret_delivery_transaction_binding_response_v3(&request, &evidence);
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+
+        reconcile_protected_launcher_secret_delivery_transaction_binding_v3(
+            &request,
+            &response,
+            &snapshot_request,
+            &snapshot_response,
+            &continuation,
+            &prelude,
+            &evidence,
+            snapshot_request.challenge.issued_at_unix_seconds,
+        )
+        .expect("snapshot- and transport-bound V3 binding reconciles");
+
+        assert_eq!(
+            request.identity,
+            "sha256:1cb85e139a74709ec675b468a55d5dccfb899ad6a6d75a6c4894006c0c0f014d",
+            "V3 request identity drifted"
+        );
+        assert_eq!(
+            response.binding.identity,
+            "sha256:f17664660a7d2ec6f9496bdbe521208e91001e101de8b228fc221a036de5b74f",
+            "V3 binding identity drifted"
+        );
+
+        let mut substituted_request = request.clone();
+        substituted_request.transport_dependency_record_identity =
+            format!("sha256:{}", "e".repeat(64));
+        substituted_request.identity =
+            protected_launcher_secret_delivery_transaction_binding_request_v3_identity(
+                &substituted_request,
+            )
+            .expect("self-consistent substituted request identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
+                &substituted_request,
+                &response,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a substituted request record identity cannot reuse the retained response"
+        );
+
+        let mut substituted_response = response.clone();
+        substituted_response
+            .binding
+            .transport_dependency_record_identity = format!("sha256:{}", "e".repeat(64));
+        substituted_response.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v3_identity(
+                &substituted_response.binding,
+            )
+            .expect("self-consistent substituted binding identity");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v3(
+                &request,
+                &substituted_response,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                snapshot_request.challenge.issued_at_unix_seconds,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a substituted binding record identity cannot satisfy the retained request"
+        );
+
+        let mut missing_request = serde_json::to_value(&request).expect("V3 request JSON");
+        missing_request
+            .as_object_mut()
+            .expect("V3 request object")
+            .remove("transport_dependency_record_identity");
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingRequestV3>(
+                missing_request
+            )
+            .is_err(),
+            "a V3 request without transport provenance must refuse"
+        );
+
+        let mut missing_binding = serde_json::to_value(&response.binding).expect("V3 binding JSON");
+        missing_binding
+            .as_object_mut()
+            .expect("V3 binding object")
+            .remove("transport_dependency_record_identity");
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingV3>(
+                missing_binding,
+            )
+            .is_err(),
+            "a V3 binding without transport provenance must refuse"
+        );
+
+        let mut malformed_request = request.clone();
+        malformed_request.transport_dependency_record_identity = "sha256:changed".into();
+        assert_eq!(
+            protected_launcher_secret_delivery_transaction_binding_request_v3_identity(
+                &malformed_request,
+            ),
+            Err(ProtocolError::InvalidRecord),
+            "a malformed request transport identity must refuse before identity derivation"
+        );
+
+        let mut malformed_binding = response.binding.clone();
+        malformed_binding.transport_dependency_record_identity =
+            format!("sha256:{}", "A".repeat(64));
+        assert_eq!(
+            protected_launcher_secret_delivery_transaction_binding_v3_identity(&malformed_binding,),
+            Err(ProtocolError::InvalidRecord),
+            "a noncanonical binding transport identity must refuse before identity derivation"
+        );
+
+        let v2_request = secret_delivery_transaction_binding_request_v2(&snapshot_response);
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingRequestV3>(
+                serde_json::to_value(&v2_request).expect("V2 request JSON")
+            )
+            .is_err(),
+            "an immutable V2 request cannot silently fall back into V3"
+        );
+        let v2_response = secret_delivery_transaction_binding_response_v2(&v2_request, &evidence);
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingV3>(
+                serde_json::to_value(&v2_response.binding).expect("V2 binding JSON"),
+            )
+            .is_err(),
+            "an immutable V2 binding cannot silently fall back into V3"
+        );
+        assert!(
+            serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingResponseV3>(
+                serde_json::to_value(v2_response).expect("V2 response JSON")
+            )
+            .is_err(),
+            "an immutable V2 response cannot silently fall back into V3"
+        );
+    }
+
+    #[test]
+    fn v4_binding_reconciles_only_the_exact_v2_snapshot() {
+        let continuation = secret_delivery_startup_continuation();
+        let snapshot_request = authority_snapshot_request_v2();
+        let snapshot_response = authority_snapshot_response_v2(&snapshot_request);
+        let evidence = secret_delivery_transaction_binding_evidence();
+        let prelude = same_child_capability_prelude(&continuation, &evidence);
+        let request = secret_delivery_transaction_binding_request_v4(&snapshot_response);
+        let response = secret_delivery_transaction_binding_response_v4(&request, &evidence);
+        assert_eq!(
+            request.identity,
+            "sha256:c12dbe454c95691468c2e6114d70237a168c3d647ed4c39419b3a6c8e2f5b669"
+        );
+        assert_eq!(
+            response.binding.identity,
+            "sha256:729adc7e0dbd0bf5019f034b20cb9783d2dca30eff7af045af4445c15f63d3f2"
+        );
+        for (name, mut value) in [
+            (
+                "request",
+                serde_json::to_value(&request).expect("V4 request JSON"),
+            ),
+            (
+                "binding",
+                serde_json::to_value(&response.binding).expect("V4 binding JSON"),
+            ),
+            (
+                "response",
+                serde_json::to_value(&response).expect("V4 response JSON"),
+            ),
+        ] {
+            value
+                .as_object_mut()
+                .expect("V4 object")
+                .insert("unknown".into(), serde_json::Value::Bool(true));
+            let rejected = match name {
+                "request" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingRequestV4,
+                >(value)
+                .is_err(),
+                "binding" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingV4,
+                >(value)
+                .is_err(),
+                "response" => serde_json::from_value::<
+                    ProtectedLauncherSecretDeliveryTransactionBindingResponseV4,
+                >(value)
+                .is_err(),
+                _ => unreachable!(),
+            };
+            assert!(rejected, "{name} must reject unknown fields");
+        }
+        let observed_at = snapshot_request.challenge.issued_at_unix_seconds;
+        reconcile_protected_launcher_secret_delivery_transaction_binding_v4(
+            &request,
+            &response,
+            &snapshot_request,
+            &snapshot_response,
+            &continuation,
+            &prelude,
+            &evidence,
+            observed_at,
+        )
+        .expect("V4 binds the retained V2 snapshot and same-child evidence");
+
+        let v1_request = authority_snapshot_request();
+        let v1_response = authority_snapshot_response(&v1_request);
+        assert_ne!(
+            request.protected_snapshot_identity,
+            v1_response.protected_snapshot_identity
+        );
+        let v3_request = secret_delivery_transaction_binding_request_v3(&v1_response);
+        let v3_response = secret_delivery_transaction_binding_response_v3(&v3_request, &evidence);
+        let v1_binding_request = secret_delivery_transaction_binding_request();
+        let v1_binding_response =
+            secret_delivery_transaction_binding_response(&v1_binding_request, &evidence);
+        let v2_binding_request = secret_delivery_transaction_binding_request_v2(&v1_response);
+        let v2_binding_response =
+            secret_delivery_transaction_binding_response_v2(&v2_binding_request, &evidence);
+        for (version, request_value, binding_value, response_value) in [
+            (
+                "V1",
+                serde_json::to_value(&v1_binding_request).expect("V1 request JSON"),
+                serde_json::to_value(&v1_binding_response.binding).expect("V1 binding JSON"),
+                serde_json::to_value(&v1_binding_response).expect("V1 response JSON"),
+            ),
+            (
+                "V2",
+                serde_json::to_value(&v2_binding_request).expect("V2 request JSON"),
+                serde_json::to_value(&v2_binding_response.binding).expect("V2 binding JSON"),
+                serde_json::to_value(&v2_binding_response).expect("V2 response JSON"),
+            ),
+            (
+                "V3",
+                serde_json::to_value(&v3_request).expect("V3 request JSON"),
+                serde_json::to_value(&v3_response.binding).expect("V3 binding JSON"),
+                serde_json::to_value(&v3_response).expect("V3 response JSON"),
+            ),
+        ] {
+            assert!(serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingRequestV4>(request_value).is_err(), "{version} request cannot become V4");
+            assert!(
+                serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingV4>(
+                    binding_value
+                )
+                .is_err(),
+                "{version} binding cannot become V4"
+            );
+            assert!(serde_json::from_value::<ProtectedLauncherSecretDeliveryTransactionBindingResponseV4>(response_value).is_err(), "{version} response cannot become V4");
+        }
+        for (name, value) in [
+            (
+                "request",
+                serde_json::to_value(&request).expect("V4 request JSON"),
+            ),
+            (
+                "binding",
+                serde_json::to_value(&response.binding).expect("V4 binding JSON"),
+            ),
+            (
+                "response",
+                serde_json::to_value(&response).expect("V4 response JSON"),
+            ),
+        ] {
+            let old_accepts =
+                match name {
+                    "request" => {
+                        serde_json::from_value::<
+                            ProtectedLauncherSecretDeliveryTransactionBindingRequestV1,
+                        >(value.clone())
+                        .is_ok()
+                            || serde_json::from_value::<
+                                ProtectedLauncherSecretDeliveryTransactionBindingRequestV2,
+                            >(value.clone())
+                            .is_ok()
+                            || serde_json::from_value::<
+                                ProtectedLauncherSecretDeliveryTransactionBindingRequestV3,
+                            >(value)
+                            .is_ok()
+                    }
+                    "binding" => serde_json::from_value::<
+                        ProtectedLauncherSecretDeliveryTransactionBindingV1,
+                    >(value.clone())
+                    .is_ok()
+                        || serde_json::from_value::<
+                            ProtectedLauncherSecretDeliveryTransactionBindingV2,
+                        >(value.clone())
+                        .is_ok()
+                        || serde_json::from_value::<
+                            ProtectedLauncherSecretDeliveryTransactionBindingV3,
+                        >(value)
+                        .is_ok(),
+                    "response" => {
+                        serde_json::from_value::<
+                            ProtectedLauncherSecretDeliveryTransactionBindingResponseV1,
+                        >(value.clone())
+                        .is_ok()
+                            || serde_json::from_value::<
+                                ProtectedLauncherSecretDeliveryTransactionBindingResponseV2,
+                            >(value.clone())
+                            .is_ok()
+                            || serde_json::from_value::<
+                                ProtectedLauncherSecretDeliveryTransactionBindingResponseV3,
+                            >(value)
+                            .is_ok()
+                    }
+                    _ => unreachable!(),
+                };
+            assert!(!old_accepts, "V4 {name} cannot become a historical carrier");
+        }
+
+        for (case, mutate) in [
+            ("schema", 0_u8),
+            ("kind", 1),
+            ("snapshot", 2),
+            ("transport", 3),
+        ] {
+            let mut changed = request.clone();
+            match mutate {
+                0 => changed.protected_snapshot_schema_version = 1,
+                1 => changed.protected_snapshot_record_kind = PROTECTED_AUTHORITY_SNAPSHOT.into(),
+                2 => changed.protected_snapshot_identity = format!("sha256:{}", "e".repeat(64)),
+                3 => {
+                    changed.transport_dependency_record_identity =
+                        format!("sha256:{}", "e".repeat(64))
+                }
+                _ => unreachable!(),
+            }
+            if mutate >= 2 {
+                changed.identity =
+                    protected_launcher_secret_delivery_transaction_binding_request_v4_identity(
+                        &changed,
+                    )
+                    .expect("reidentified V4 request");
+                assert_eq!(
+                    reconcile_protected_launcher_secret_delivery_transaction_binding_response_v4(
+                        &changed,
+                        &response,
+                        &snapshot_request,
+                        &snapshot_response,
+                        &continuation,
+                        &prelude,
+                        &evidence.verifier,
+                        &evidence.installation_evidence_identity,
+                        observed_at,
+                    ),
+                    Err(ProtocolError::InvalidRecord),
+                    "{case}"
+                );
+            } else {
+                assert_eq!(
+                    protected_launcher_secret_delivery_transaction_binding_request_v4_identity(
+                        &changed
+                    ),
+                    Err(ProtocolError::InvalidRecord),
+                    "{case}"
+                );
+            }
+        }
+
+        let mut changed = response.clone();
+        changed.binding.protected_snapshot_identity = format!("sha256:{}", "e".repeat(64));
+        changed.binding.identity =
+            protected_launcher_secret_delivery_transaction_binding_v4_identity(&changed.binding)
+                .expect("reidentified V4 binding");
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v4(
+                &request,
+                &changed,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                observed_at,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+
+        for (case, mutate) in [("schema", 0_u8), ("kind", 1)] {
+            let mut changed = response.clone();
+            match mutate {
+                0 => changed.binding.protected_snapshot_schema_version = 1,
+                1 => {
+                    changed.binding.protected_snapshot_record_kind =
+                        PROTECTED_AUTHORITY_SNAPSHOT.into()
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                protected_launcher_secret_delivery_transaction_binding_v4_identity(
+                    &changed.binding
+                ),
+                Err(ProtocolError::InvalidRecord),
+                "binding {case} cannot downgrade its snapshot discriminator"
+            );
+        }
+
+        let mut changed = response.clone();
+        changed.protected_snapshot_record_kind = PROTECTED_AUTHORITY_SNAPSHOT.into();
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v4(
+                &request,
+                &changed,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                observed_at,
+            ),
+            Err(ProtocolError::InvalidRecord)
+        );
+        let mut changed = response.clone();
+        changed.protected_snapshot_schema_version = 1;
+        assert_eq!(
+            reconcile_protected_launcher_secret_delivery_transaction_binding_response_v4(
+                &request,
+                &changed,
+                &snapshot_request,
+                &snapshot_response,
+                &continuation,
+                &prelude,
+                &evidence.verifier,
+                &evidence.installation_evidence_identity,
+                observed_at,
+            ),
+            Err(ProtocolError::InvalidRecord),
         );
     }
 }

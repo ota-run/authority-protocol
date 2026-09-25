@@ -40,15 +40,68 @@ This repository owns:
 - additive runtime-boundary attestation v2 types and canonical protected-launcher profiles;
 - immutable principal-mapping, Ota process-posture, and systemd launcher-profile records used by
   the production protected-launcher adapter;
+- immutable systemd Launcher V3 and V4 profiles, where V4 retains the V3 procfs restriction and
+  adds exact named listener and manager-opened read-only boot-ID descriptor roles;
+- an additive protected-launcher capability record binding one exact request, launcher
+  installation, root service, systemd/cgroup invocation, unprivileged Ota subject, and the closed
+  retained-descriptor set without carrying paths, file content, tokens, or provider responses;
+- closed administrator-authority, protected Launcher/Ota implementation-subject, and authority-
+  context records, including a 256-bit administrator-generated authority-instance identifier, plus
+  domain-separated invocation-nonce and non-nil canonical Linux boot identities for a future
+  installer-owned capability context;
+- closed challenge, public capability-observation projection, and administrator-installed verifier
+  records that bind one fresh workflow invocation without publishing the raw protected-capability
+  identity or its transitive private correlation inputs;
+- a closed protected Launcher-to-Attestor signing envelope that binds the exact private capability,
+  public payload, producer binding, verifier, and projection identity while returning only the
+  signed public projection, with cross-record reconciliation against the retained request;
+- a closed same-execution secret-delivery transaction-binding exchange. Core sends the exact
+  Launcher request identity retained in its startup continuation, not caller-reconstructed request
+  content. Protocol reconciles that request to the retained continuation before protected
+  derivation, signing, or replay mutation. Launcher then privately reconciles capability evidence
+  before returning the private binding and signed public projection; Core separately reconciles that response against its retained
+  request and independently loaded verifier and installation identities before signature policy;
+- a closed private protected-authority snapshot challenge, request, payload, and response, plus an
+  additive snapshot-bound V2 transaction-binding exchange. The snapshot binds exact selected-child
+  request/startup/session, protected store descriptor metadata and bytes, and the current signed
+  verifier/bundle state; Core treats transferred bytes as untrusted semantic input and must
+  independently reconstruct its selected Step 1-6 truth. V1 remains immutable. Protocol neither
+  opens stores nor verifies their live provenance, reserves replay state, parses provider bindings,
+  contacts a provider, or activates delivery or execution;
+- an additive snapshot-bound V3 transaction-binding exchange that preserves V2 unchanged and binds
+  one exact transport-dependency-record identity into both the request and private binding. Protocol
+  validates only that closed identity relationship. Core retains ownership of the complete expected
+  dependency graph and record, Cargo resolution, semantic comparison, and candidate derivation;
+  the V3 exchange grants no installation authority and opens no transport or provider path;
+- additive V2 protected-authority snapshot records that retain descriptor-bound verifier and binding
+  stores only as canonical raw bytes, avoiding V1's duplicate parsed carriers while retaining the
+  fixed one-frame bound. Protocol structurally decodes and reconciles those records only; it does
+  not verify the bundle signature, load stores, compare administrator dependency expectations, or
+  authorize a V4 transaction, network request, provider operation, delivery, or execution;
+- additive V4 transaction-binding records that require the exact V2 snapshot identity, schema,
+  and kind across request, private binding, and response, while retaining V3's same-child and
+  transport-dependency reconciliation. These are structural records; Launcher and Core still own
+  their respective authority, signature, candidate, and one-use runtime checks;
+- closed protected secret-delivery verifier-store and binding-bundle records. The store admits
+  exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an
+  opaque, bounded payload identity and domain-separated Ed25519 signature envelope without making
+  provider bindings, paths, or secret material public;
 - the bounded Linux systemd-launcher client/service request, output, and terminal frames;
 - bounded four-byte big-endian framing;
 - JCS plus SHA-256 message identities; and
 - compatibility and adversarial conformance tests.
 
-It does not own repository contracts, semantic-scope derivation, admission policy, signing keys,
-approval workflows, broker persistence, transport credentials, execution, receipt creation,
-protected archive storage, or semantic archive verification. Those remain with Ota Core, the
-authority launcher, and the chosen broker implementation.
+It defines canonical projection and binding-bundle signature bytes but does not own repository contracts,
+semantic-scope derivation, admission policy, signing keys, challenge replay persistence, signature
+verification policy, protected-store loading, approval workflows, broker persistence, transport credentials, execution,
+receipt creation, protected archive storage, or semantic archive verification. Those remain with
+Ota Core, the authority launcher, and the chosen broker implementation. A structurally valid public
+projection is neither authority nor evidence of provider contact, delivery, execution approval, or
+cleanup. The authority-context records are canonical structural truth only: Protocol does not
+install them, establish filesystem ownership, observe procfs, generate runtime nonces, or reconcile
+installed executables. A structurally valid binding bundle is likewise not provider authority and
+does not establish cryptographic verification, current protected-store bytes, replay state, provider
+contact, delivery, execution approval, receipt, or assurance.
 
 ## Wire sequence
 
@@ -247,7 +300,11 @@ adapter can execute:
   transition clears the ambient capability before selected code can execute. The profile also
   makes effective systemd runtime configuration read-only inside the launcher boundary and replaces
   `/proc/net/unix` path observation with protected socket metadata and descriptor identity. Its profile identity is
-  `sha256:b5853a12e72c4ca32b0f93a38bc8f1097c7809039b58449f67fcf9019d0ea480`.
+  `sha256:1d0ef44c24b6ec21dc0c462edd52c5197ae35a4a1728a98cd93b92d6f106dfaf`.
+- `ota.authority-launcher.systemd/v4` preserves V3's procfs restrictions and adds exactly one
+  manager-opened read-only boot-ID descriptor plus one canonical launcher-listener descriptor name.
+  Its profile identity is
+  `sha256:bdac5f965aa56d44de8581e194ac0364b2d4c98183fff0cbb223574fd78197a8`.
 - `ota.authority-job-principal.systemd/v1` fixes the ordered job-peer, execution-principal,
   privilege, process-containment, and process-inspection requirements. Its profile identity is
   `sha256:e69ef375070bbb4f5616ba46b6f29b9a987372909016d1a1dfa40a5d4daae93d`.
@@ -259,6 +316,16 @@ adapter can execute:
 These definitions do not implement systemd, inspect a host, hold an attestor key, or create a
 provider claim. Core and authority-launcher must pin the same immutable protocol revision and
 independently verify their respective boundaries before the adapter can be enabled.
+
+`ProtectedLauncherCapabilityV1` is an additive protocol foundation for that independent
+verification. It canonicalizes exactly one launcher-session socket, verifier store, binding store,
+and invocation-cgroup descriptor; binds each store to a role-specific protected content identity;
+and derives the cgroup identity from the exact retained descriptor and systemd scope. It is not
+authority, does not prove that the descriptors were securely opened, and does not activate OIDC,
+provider contact, secret delivery, or execution. This protocol revision includes a semantic
+reconciliation API over independently observed launcher records and store bytes. No released or
+current authority-launcher emits the record, and no released or current Core/runtime consumes it.
+Those implementations and their hosted proof remain separate subsequent work.
 
 ### Systemd launcher service frames
 
