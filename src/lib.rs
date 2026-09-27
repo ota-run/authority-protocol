@@ -32,6 +32,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod private_oidc_relay;
+pub use private_oidc_relay::*;
+
 pub const PROTOCOL_VERSION_V1: &str = "ota-crossing-broker/v1";
 pub const RUNTIME_BOUNDARY_ATTESTATION_PROTOCOL_V2: &str = "ota-runtime-boundary-attestation/v2";
 pub const SYSTEMD_PROTECTED_LAUNCHER_ATTESTATION_PROTOCOL_V3: &str =

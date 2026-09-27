@@ -82,6 +82,10 @@ This repository owns:
   and kind across request, private binding, and response, while retaining V3's same-child and
   transport-dependency reconciliation. These are structural records; Launcher and Core still own
   their respective authority, signature, candidate, and one-use runtime checks;
+- an additive private GitHub OIDC capability-relay V1 wire shape: closed non-secret
+  request/challenge/acknowledgement records and bounded binary sender/receive owners that wipe
+  their secret buffers on drop, including partial reads. This does not install the job-client or same-child relay, authenticate a peer,
+  consume V4 authority, dispatch HTTP, or establish provider contact;
 - closed protected secret-delivery verifier-store and binding-bundle records. The store admits
   exactly one verifier and pins exactly one current signed bundle generation; the bundle binds an
   opaque, bounded payload identity and domain-separated Ed25519 signature envelope without making

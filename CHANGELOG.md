@@ -26,6 +26,12 @@
 
 ## Unreleased
 
+- Define an additive, private GitHub OIDC capability-relay V1 wire shape with exact
+  non-secret request/challenge/acknowledgement records and bounded, zeroizing binary sender,
+  receive, and frame owners, including incomplete reads.
+  This is structural protocol only: no credential source, session relay, provider contact,
+  execution authority, or hosted proof is activated.
+
 - Add closed V4 same-child transaction-binding request, binding, and response records that
   reconcile only an exact V2 authority snapshot. All three carriers bind the snapshot schema and
   kind alongside its identity and the existing transport-dependency record identity. V3 remains
